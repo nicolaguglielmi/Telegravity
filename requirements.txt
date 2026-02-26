@@ -1,0 +1,4 @@
+mcp[fastmcp]>=0.1.0
+python-telegram-bot>=21.0
+watchdog>=3.0.0
+python-dotenv>=1.0.0

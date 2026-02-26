@@ -1,0 +1,26 @@
+{
+    "mcpServers": {
+        "telegram-gateway": {
+            "command": "podman",
+            "args": [
+                "run",
+                "-i",
+                "--rm",
+                "-v",
+                "/Users/nicola/Dev/AG-Uplink:/app:Z",
+                "--env-file",
+                "/Users/nicola/Dev/AG-Uplink/.env",
+                "telegram-mcp-gateway",
+                "watchmedo",
+                "auto-restart",
+                "--directory=.",
+                "--pattern=*.py;*.txt;*.json",
+                "--recursive",
+                "--signal=SIGKILL",
+                "--",
+                "python",
+                "server.py"
+            ]
+        }
+    }
+}
