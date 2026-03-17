@@ -1,14 +1,14 @@
 import os
 import asyncio
-from server import send_message, check_updates, bot
+from server import send_message, check_telegram_updates, bot
 
 async def test_tools():
     print("Testing send_message tool...")
     result = await send_message(text="🛠️ Testing tool integration...")
     print(f"Result: {result}")
     
-    print("\nTesting check_updates tool...")
-    updates = await check_updates(limit=3)
+    print("\nTesting check_telegram_updates tool...")
+    updates = await check_telegram_updates()
     print("Recent updates:")
     for msg in updates:
         print(f" - {msg}")

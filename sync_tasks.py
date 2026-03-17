@@ -1,13 +1,15 @@
 import asyncio
+import os
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 async def sync():
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     server_params = StdioServerParameters(
         command="podman",
         args=[
             "run", "-i", "--rm",
-            "-v", "/Users/nicola/Dev/AG-Uplink/telegram-mcp-gateway:/app:Z",
+            "-v", f"{current_dir}:/app:Z",
             "telegram-mcp-gateway",
             "python", "server.py"
         ],
@@ -40,16 +42,16 @@ async def sync():
             await session.initialize()
             
             # Sync AG-Uplink
-            res1 = await session.call_tool("import_tasks", {
+            res1 = await session.call_tool("import_conversations", {
                 "workspace_name": "AG-Uplink",
-                "tasks": tasks_ag_uplink
+                "conversations": tasks_ag_uplink
             })
             print(f"AG-Uplink sync: {res1.content[0].text}")
             
             # Sync AI-Radar
-            res2 = await session.call_tool("import_tasks", {
+            res2 = await session.call_tool("import_conversations", {
                 "workspace_name": "AI-Radar",
-                "tasks": tasks_ai_radar
+                "conversations": tasks_ai_radar
             })
             print(f"AI-Radar sync: {res2.content[0].text}")
 

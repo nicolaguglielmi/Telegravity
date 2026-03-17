@@ -45,9 +45,11 @@ CONFIG_FILE = "workspaces.txt"
 CONVERSATIONS_FILE = "conversations.json"
 TASKS_FILE = "tasks.json" # For migration
 LOG_FILE = "activity.log"
+CONVERSATIONS_LOG_FILE = "conversations.log"
 CHAT_MODE = False
 LAST_AI_MESSAGE_INDEX = 0
 STATE_FILE = "state.json"
+ACTIVE_CONVERSATION_INDEX = None # Track the index of the conversation in focus
 
 # Signaling for Active Listening
 NEW_MESSAGE_EVENT = asyncio.Event()
@@ -62,13 +64,14 @@ def save_state():
             json.dump({
                 "current_workspace": CURRENT_WORKSPACE,
                 "chat_mode": CHAT_MODE,
-                "last_index": LAST_AI_MESSAGE_INDEX
+                "last_index": LAST_AI_MESSAGE_INDEX,
+                "active_conversation": ACTIVE_CONVERSATION_INDEX
             }, f)
     except Exception as e:
         logger.error(f"Failed to save state: {e}")
 
 def load_state():
-    global CURRENT_WORKSPACE, CHAT_MODE, LAST_AI_MESSAGE_INDEX
+    global CURRENT_WORKSPACE, CHAT_MODE, LAST_AI_MESSAGE_INDEX, ACTIVE_CONVERSATION_INDEX
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r") as f:
@@ -77,6 +80,7 @@ def load_state():
                 CURRENT_WORKSPACE = state.get("current_workspace")
                 CHAT_MODE = state.get("chat_mode", False)
                 LAST_AI_MESSAGE_INDEX = state.get("last_index", 0)
+                ACTIVE_CONVERSATION_INDEX = state.get("active_conversation")
         except Exception as e:
             logger.error(f"Failed to load state: {e}")
 
@@ -137,25 +141,52 @@ bot: Optional[Bot] = None
 
 async def render_dashboard(chat_id: int, edit_query=None):
     """Unified function to show the main dashboard."""
-    global CURRENT_WORKSPACE, CHAT_MODE
+    global CURRENT_WORKSPACE, CHAT_MODE, ACTIVE_CONVERSATION_INDEX
     status = "ON 🟢" if CHAT_MODE else "OFF 🔴"
-    reply = f"🛡️ *AG-Uplink Agent Dashboard* 🛰️\n"
-    reply += "--------------------------------\n"
-    reply += f"📍 *Project:* `{CURRENT_WORKSPACE or 'Not Selected'}`\n"
-    reply += f"💬 *Remote Chat:* {status}\n\n"
-    reply += "Choose an action:"
     
-    keyboard = [
-        [InlineKeyboardButton("📂 Select Workspace", callback_data="ui_workspaces"), 
-         InlineKeyboardButton("💬 Conversation Hub", callback_data="ui_conversations")],
-        [InlineKeyboardButton("🚀 New Conversation", callback_data="ui_new_conv"),
-         InlineKeyboardButton("🔁 Continue Interaction", callback_data="ui_followup")],
-        [InlineKeyboardButton("📈 Project Stats", callback_data="ui_stats"),
-         InlineKeyboardButton("♻️ Sync Config", callback_data="ui_reload")],
-        [InlineKeyboardButton(f"🗣️ {'Disable' if CHAT_MODE else 'Enable'} Remote Chat", callback_data="ui_chat_toggle")]
-    ]
-    
-    markup = InlineKeyboardMarkup(keyboard)
+    # 1. Handle No Workspace Selected
+    if not CURRENT_WORKSPACE:
+        reply = f"🛡️ *AG-Uplink Agent Dashboard* 🛰️\n"
+        reply += "--------------------------------\n"
+        reply += "📍 *Project:* `Not Selected`\n\n"
+        reply += "Please select a workspace to begin:"
+        
+        keyboard = []
+        if not WORKSPACES:
+            reply += "\n_No workspaces registered._"
+        else:
+            for i in range(0, len(WORKSPACES), 2):
+                row = [InlineKeyboardButton(ws, callback_data=f"select:{ws}") for ws in WORKSPACES[i:i+2]]
+                keyboard.append(row)
+        
+        # Add a reload button just in case
+        keyboard.append([InlineKeyboardButton("🔄 Reload Workspaces", callback_data="ui_sync")])
+        markup = InlineKeyboardMarkup(keyboard)
+        
+    else:
+        # 2. Handle Workspace Selected
+        conversations = WORKSPACE_CONVERSATIONS.get(CURRENT_WORKSPACE, [])
+        active_conv_text = "None"
+        if ACTIVE_CONVERSATION_INDEX is not None and 0 <= ACTIVE_CONVERSATION_INDEX < len(conversations):
+            active_conv_text = conversations[ACTIVE_CONVERSATION_INDEX]['desc']
+            if len(active_conv_text) > 30: active_conv_text = active_conv_text[:27] + "..."
+
+        reply = f"🛡️ *AG-Uplink Dashboard* 🛰️\n"
+        reply += "--------------------------------\n"
+        reply += f"📍 *Workspace:* `{CURRENT_WORKSPACE}`\n"
+        reply += f"💬 *Active Focus:* `{active_conv_text}`\n"
+        reply += f"🗣️ *Chat Mode:* {status}\n\n"
+        reply += "Choose an action:"
+        
+        keyboard = [
+            [InlineKeyboardButton("💬 Conv Hub", callback_data="ui_conversations"),
+             InlineKeyboardButton("🚀 New Conv", callback_data="ui_new_conv")],
+            [InlineKeyboardButton("♻️ Sync", callback_data="ui_sync"),
+             InlineKeyboardButton("📈 Stats", callback_data="ui_stats")],
+            [InlineKeyboardButton(f"🗣️ {'Disable' if CHAT_MODE else 'Enable'} Remote Chat", callback_data="ui_chat_toggle")],
+            [InlineKeyboardButton("📂 Switch Workspace", callback_data="ui_workspaces")]
+        ]
+        markup = InlineKeyboardMarkup(keyboard)
     if edit_query:
         try:
             await edit_query.edit_message_text(text=reply, reply_markup=markup, parse_mode="Markdown")
@@ -381,6 +412,14 @@ def save_log(entry: str):
     except Exception as e:
         logger.error(f"Failed to save log: {e}")
 
+def save_conversation_log(entry: str):
+    """Appends an entry to the conversations log file."""
+    try:
+        with open(CONVERSATIONS_LOG_FILE, "a") as f:
+            f.write(entry + "\n")
+    except Exception as e:
+        logger.error(f"Failed to save conversation log: {e}")
+
 def load_logs():
     """Loads recent logs into memory buffer."""
     global MESSAGE_BUFFER
@@ -396,6 +435,7 @@ def load_logs():
 # --- BACKGROUND TASKS ---
 async def polling_worker():
     """Background task to poll for updates and handle commands."""
+    global LAST_AI_MESSAGE_INDEX, CHAT_MODE
     offset = 0
     logger.info("Background polling worker active.")
     while True:
@@ -426,6 +466,14 @@ async def polling_worker():
                         msg_log = f"[{timestamp}] 👤 {sender}: {update.message.text}"
                         MESSAGE_BUFFER.append(msg_log)
                         save_log(msg_log)
+                        save_conversation_log(msg_log)
+                        
+                        # Add buffer limit check
+                        if len(MESSAGE_BUFFER) > BUFFER_LIMIT:
+                            MESSAGE_BUFFER.pop(0)
+                            if LAST_AI_MESSAGE_INDEX > 0:
+                                LAST_AI_MESSAGE_INDEX -= 1
+                                
                         # Signal Active Listening waiters
                         NEW_MESSAGE_EVENT.set()
                         # The AI Agent will read this from the resource or check_updates tool
@@ -440,6 +488,7 @@ async def polling_worker():
                     MESSAGE_BUFFER.append(msg_log)
                     NEW_MESSAGE_EVENT.set()
                     save_log(msg_log)
+                    save_conversation_log(msg_log)
                     if len(MESSAGE_BUFFER) > BUFFER_LIMIT:
                         MESSAGE_BUFFER.pop(0)
                         if LAST_AI_MESSAGE_INDEX > 0:
@@ -451,7 +500,7 @@ async def polling_worker():
 
 async def handle_callback(update: Update):
     """Handles button clicks for workspace selection."""
-    global CURRENT_WORKSPACE, CHAT_MODE
+    global CURRENT_WORKSPACE, CHAT_MODE, ACTIVE_CONVERSATION_INDEX
     query = update.callback_query
     data = query.data
 
@@ -493,8 +542,7 @@ async def handle_callback(update: Update):
                 keyboard.append([InlineKeyboardButton(f"{status_icon} {desc}", callback_data=f"conv_view:{idx}")])
         
         keyboard.append([
-            InlineKeyboardButton("🚀 New Conversation", callback_data="ui_new_conv"),
-            InlineKeyboardButton("🔁 Global Follow-up", callback_data="ui_followup")
+            InlineKeyboardButton("🚀 New Conversation", callback_data="ui_new_conv")
         ])
         keyboard.append([InlineKeyboardButton("📖 Interaction History", callback_data="ui_chat_log")])
         keyboard.append([InlineKeyboardButton("🏠 Main Dashboard", callback_data="ui_menu")])
@@ -504,17 +552,11 @@ async def handle_callback(update: Update):
 
 
     elif data == "ui_workspaces" or data == "menu":
-        keyboard = []
-        for i in range(0, len(WORKSPACES), 2):
-            row = [InlineKeyboardButton(ws, callback_data=f"select:{ws}") for ws in WORKSPACES[i:i+2]]
-            keyboard.append(row)
-        keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="ui_menu")])
-            
-        await query.edit_message_text(
-            text="🏷️ *Workspace Selection Menu*",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
+        # Simplified: Just clear selection to trigger workspace picker on dashboard
+        CURRENT_WORKSPACE = None
+        ACTIVE_CONVERSATION_INDEX = None # Clear active conv on switch
+        save_state()
+        await render_dashboard(query.message.chat_id, edit_query=query)
         await query.answer()
 
     elif data == "ui_menu":
@@ -552,7 +594,7 @@ async def handle_callback(update: Update):
             else:
                 reply += "\n*Insight:*\n_No interactions recorded yet._\n"
             
-            keyboard.append([InlineKeyboardButton("🔁 Continue this Conversation", callback_data=f"ui_followup_conv:{idx}")])
+            keyboard.append([InlineKeyboardButton("💬 Enter Chat (Follow-up)", callback_data=f"ui_enter_chat:{idx}")])
             keyboard.append([InlineKeyboardButton("📖 Conversation Log", callback_data="ui_chat_log")])
             keyboard.append([InlineKeyboardButton("🔙 Back to Hub", callback_data="ui_conversations")])
             keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="ui_menu")])
@@ -599,34 +641,34 @@ async def handle_callback(update: Update):
                 await query.edit_message_text(text=reply, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         await query.answer()
 
-    elif data.startswith("conv_done:"):
-        # This functionality is now handled by the AI's update_conversation tool
-        await query.answer("Status updates are now handled by the AI.", show_alert=True)
-
-    elif data == "ui_stats":
-        total_ws = len(WORKSPACES)
-        total_convs = sum(len(c) for c in WORKSPACE_CONVERSATIONS.values())
+    elif data == "ui_sync":
+        # Trigger standard message to notify AI to sync
+        msg = "--- FORCE SYNC REQUESTED ---"
+        MESSAGE_BUFFER.append(f"[{timestamp_now()}] AG-Uplink: {msg}")
+        save_log(f"[{timestamp_now()}] AG-Uplink: {msg}")
+        NEW_MESSAGE_EVENT.set()
+        await query.answer("Sync triggered. Agent notified.")
         
-        reply = f"📊 *Project Statistics:*\n\n"
-        reply += f"• Workspaces: {total_ws}\n"
-        reply += f"• Total Conversations: {total_convs}\n"
-        
-        # Breakdown by workspace
-        for ws in WORKSPACES:
-            ws_convs = WORKSPACE_CONVERSATIONS.get(ws, [])
-            if ws_convs:
-                reply += f"*{ws}:* {len(ws_convs)} active\n"
-        
-        keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="ui_menu")]]
-        await query.edit_message_text(text=reply, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        await query.answer()
-
-    elif data == "ui_reload":
+        # Optionally reload workspaces file too
         count = load_workspaces()
-        await query.answer(f"Reloaded {count} workspaces.")
-        # Refresh menu
-        update.callback_query.data = "ui_menu"
-        await handle_callback(update)
+        await render_dashboard(query.message.chat_id, edit_query=query)
+
+    elif data.startswith("ui_enter_chat:"):
+        idx = int(data.split(":")[1])
+        ACTIVE_CONVERSATION_INDEX = idx
+        CHAT_MODE = True
+        save_state()
+        
+        conversations = WORKSPACE_CONVERSATIONS.get(CURRENT_WORKSPACE, [])
+        conv_desc = conversations[idx]['desc'] if idx < len(conversations) else "Unknown"
+        
+        await query.answer("Chat Active")
+        await bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"💬 *Chatting in:* `{conv_desc}`\nType your message below. Type `/exit` or use Menu to leave.",
+            parse_mode="Markdown"
+        )
+        await render_dashboard(query.message.chat_id, edit_query=None) # Refresh
 
     elif data == "ui_chat_toggle":
         CHAT_MODE = not CHAT_MODE
@@ -714,6 +756,7 @@ async def send_message(text: str) -> str:
         msg_log = f"[{timestamp_now()}] 🧠 Agent: {text}"
         MESSAGE_BUFFER.append(msg_log)
         save_log(msg_log)
+        save_conversation_log(msg_log)
         return f"SUCCESS: Message sent."
     except TelegramError as e:
         return f"ERROR: {str(e)}"
@@ -768,13 +811,19 @@ async def wait_for_remote_instruction(timeout_sec: int = 300) -> List[str]:
 @mcp.tool()
 async def get_state() -> str:
     """Returns current selection, conversations, and recent history."""
+    global ACTIVE_CONVERSATION_INDEX
     history = "\n".join(MESSAGE_BUFFER[-10:])
     conversations = WORKSPACE_CONVERSATIONS.get(CURRENT_WORKSPACE, [])
     conv_str = "No conversations."
     if conversations:
+        # Avoid breaking older parsing if any, but adding status is good
         conv_str = "\n".join([f"- [{c['status']}] {c['desc']}" for c in conversations])
         
-    return f"CURRENT WORKSPACE: {CURRENT_WORKSPACE or 'None'}\n\nCONVERSATIONS:\n{conv_str}\n\nHISTORY:\n{history}"
+    active_conv = "None"
+    if ACTIVE_CONVERSATION_INDEX is not None and 0 <= ACTIVE_CONVERSATION_INDEX < len(conversations):
+        active_conv = conversations[ACTIVE_CONVERSATION_INDEX]['desc']
+        
+    return f"CURRENT WORKSPACE: {CURRENT_WORKSPACE or 'None'}\nACTIVE CONVERSATION: {active_conv}\n\nCONVERSATIONS:\n{conv_str}\n\nHISTORY:\n{history}"
 
 @mcp.tool()
 async def update_conversation(
@@ -832,8 +881,10 @@ async def update_conversation(
         conv['interactions'].append(report)
         conv['output'] = f"Latest Interaction: {log_title}"
     
+    save_conversation_log(f"[{timestamp_now()}] 🛰️ [Update] Conversation '{conv_desc}' -> Status: {status} | {log_title or 'No Title'}")
     save_conversations()
     return f"SUCCESS: Conversation '{conv_desc}' updated. Log '{log_title}' added."
+
 
 # Removed duplicate check_updates tool as it is superseded by check_telegram_updates
 
