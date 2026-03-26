@@ -4,15 +4,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 async def sync():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
     server_params = StdioServerParameters(
-        command="podman",
-        args=[
-            "run", "-i", "--rm",
-            "-v", f"{current_dir}:/app:Z",
-            "telegram-mcp-gateway",
-            "python", "server.py"
-        ],
+        command="python3",
+        args=["server.py"],
         env=None
     )
     

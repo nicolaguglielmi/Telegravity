@@ -41,14 +41,15 @@ CURRENT_WORKSPACE = None
 WORKSPACE_CONVERSATIONS = {}  # {workspace_name: [conv_obj, ...]}
 MESSAGE_BUFFER = []
 BUFFER_LIMIT = 50
-CONFIG_FILE = "workspaces.txt"
-CONVERSATIONS_FILE = "conversations.json"
-TASKS_FILE = "tasks.json" # For migration
-LOG_FILE = "activity.log"
-CONVERSATIONS_LOG_FILE = "conversations.log"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(SCRIPT_DIR, "workspaces.txt")
+CONVERSATIONS_FILE = os.path.join(SCRIPT_DIR, "conversations.json")
+TASKS_FILE = os.path.join(SCRIPT_DIR, "tasks.json") # For migration
+LOG_FILE = os.path.join(SCRIPT_DIR, "activity.log")
+CONVERSATIONS_LOG_FILE = os.path.join(SCRIPT_DIR, "conversations.log")
 CHAT_MODE = False
 LAST_AI_MESSAGE_INDEX = 0
-STATE_FILE = "state.json"
+STATE_FILE = os.path.join(SCRIPT_DIR, "state.json")
 ACTIVE_CONVERSATION_INDEX = None # Track the index of the conversation in focus
 
 # Signaling for Active Listening
@@ -468,6 +469,16 @@ async def polling_worker():
                         save_log(msg_log)
                         save_conversation_log(msg_log)
                         
+                        # Add immediate acknowledgment back to Telegram
+                        try:
+                            await bot.send_message(
+                                chat_id=update.message.chat_id,
+                                text=f"✅ *Received:* `{update.message.text}`\n_Forwarding to agent..._",
+                                parse_mode="Markdown"
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send ack message: {e}")
+                        
                         # Add buffer limit check
                         if len(MESSAGE_BUFFER) > BUFFER_LIMIT:
                             MESSAGE_BUFFER.pop(0)
@@ -883,6 +894,24 @@ async def update_conversation(
     
     save_conversation_log(f"[{timestamp_now()}] 🛰️ [Update] Conversation '{conv_desc}' -> Status: {status} | {log_title or 'No Title'}")
     save_conversations()
+    
+    # Add automatic Telegram notification
+    try:
+        from telegram.constants import ParseMode
+        msg = f"🛰️ *Task Update*: `{conv_desc}`\n*Status*: `{status}`"
+        if log_title:
+            msg += f"\n*Action*: {log_title}"
+        if summary:
+            msg += f"\n_Summary_: {summary}"
+            
+        await bot.send_message(
+            chat_id=CHAT_ID, 
+            text=msg, 
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Failed to send Telegram task update: {e}")
+        
     return f"SUCCESS: Conversation '{conv_desc}' updated. Log '{log_title}' added."
 
 
@@ -942,7 +971,7 @@ async def main():
     load_state()
 
     
-    with open("startup.log", "w") as f:
+    with open(os.path.join(SCRIPT_DIR, "startup.log"), "w") as f:
         f.write(f"CHAT_ID: {CHAT_ID}\n")
         f.write(f"TOKEN: {TELEGRAM_TOKEN[:10]}...\n")
 
