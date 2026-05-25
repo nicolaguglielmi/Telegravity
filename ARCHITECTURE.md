@@ -1,119 +1,176 @@
-# 🏗️ AG-Uplink: Remote Command Center Architecture
+# 🏗️ Telegravity Architecture
 
-This document describes the internal architecture of the AG-Uplink Telegram MCP Gateway.
+Telegravity is a single Python process that does two things concurrently:
 
-## 🧱 Component Overview
+1. **MCP server** over stdio — answers JSON-RPC calls from your AI agent
+   (Antigravity, Claude Code, Cursor, Cline, Zed Agent, …).
+2. **Telegram bot** — long-polls `getUpdates` and renders the chat UI.
 
-AG-Uplink acts as a stateful bridge between the Model Context Protocol (MCP) and the Telegram Bot API.
+Both share an in-memory `StateManager` (with an `asyncio.Lock` around the
+mutating bits) and persist to a `data/` directory.
 
-### 1. Data Model: Workspace -> Conversation -> Interaction
-The project follows a tiered hierarchy to manage complex AI workflows:
-- **Workspace**: A project container (e.g., "AG-Uplink", "AI-Radar").
-- **Conversation**: A specific thread within a workspace (e.g., "Implementing Task Management").
-- **Interaction**: A single exchange (Request/Response) within a conversation, containing rich logs and metadata.
-
-### 2. State Management
-AG-Uplink uses multiple JSON stores to ensure persistence across restarts:
-- `state.json`: Global configuration (Active Workspace, Chat Mode, Message Index).
-- `conversations.json`: The core database of all conversations and interaction logs.
-- `activity.log`: Sequential record of all Telegram events and bot responses.
-- `workspaces.txt`: User-defined entry list for project selection.
-
-### 3. Lifecycle & Threading
-The server runs on a single `asyncio` loop with several concurrent workers:
-- **MCP Server**: Listens on `stdin/stdout` for JSON-RPC requests from the AI Agent.
-- **Polling Worker**: Continuously checks Telegram for new messages and callback queries.
-- **Config Watcher**: Monitors `workspaces.txt` for changes and hot-reloads the list without restart.
-
-## 🛠️ MCP Tool Definitions
-
-AG-Uplink exposes its state to the AI Agent via standard MCP tools:
-
-| Tool | Purpose |
-| :--- | :--- |
-| `send_message` | Sends raw text or structured AI responses to Telegram. |
-| `check_telegram_updates` | Pulls new user messages from the buffer since the last check. |
-| `get_state` | Provides the Agent with the current active workspace and conversation list. |
-| `update_conversation` | Allows the Agent to log its progress and interaction details. |
-| `import_conversations` | Bulk-loads conversation descriptors (useful for migration). |
-
-## 📡 Message Flow (Remote Chat Mode)
-
-1. **User** sends a message to Telegram.
-2. **Polling Worker** captures the message and appends it to `MESSAGE_BUFFER`.
-3. **AI Agent** calls `check_telegram_updates` through the MCP client.
-4. **AI Agent** processes the instruction and performs work.
-5. **AI Agent** calls `update_conversation` to log technical details.
-6. **AI Agent** calls `send_message` to notify the user of completion.
-
-## 🔄 The Antigravity Loop (How "Action" Happens)
-
-Users might wonder why "nothing happens" immediately after a Telegram message is sent. The logic is as follows:
-1. **Passive Buffer**: AG-Uplink is a *passive* bridge. It stores your messages but does not execute code itself.
-2. **Active Polling**: I (the AI Agent) am the *active* component. I call `check_telegram_updates` at the start of my thinking cycle.
-3. **Execution**: Once I read your message from the buffer, I enter my **Execution Mode** to perform the requested changes.
-4. **Conclusion**: I then post a new **Interaction Log** to the hub and send a confirmation message.
-
-### ⚡️ Active Mode (Server-Push Experience)
-
-To avoid the "Passive Bridge" delay, you can now toggle **Active Mode**. When I am in this mode:
-1. I call `wait_for_remote_instruction` (long-polling).
-2. I stay in a "Thinking" state, efficiently waiting for your Telegram messages.
-3. As soon as you type on Telegram, I "wake up" immediately and execute the request.
-4. This removes the need for any local IDE chat to "wake me up".
-
-### 🔔 The Acknowledgement Flow
-
-When you send a command via Telegram, I (the Agent) will perform the following sequence:
-1. **Taking Charge**: I'll send an immediate confirmation: *"🤖 Acknowledged: Processing your instruction..."*
-2. **Dashboard Sync**: I'll update the Conversation Hub status to **🟡 In Progress** or **🚀 Executing**.
-3. **Mission Complete**: Once finished, I'll send a final summary and update the Hub status to **✅ Done**.
-
-*Note: In Active Mode, your IDE will show me as "Working" while I wait for your remote commands.*
-
-## 🎨 UI & Navigation Logic
-
-AG-Uplink uses a centralized rendering engine for its interactive dashboard:
-- **`render_dashboard`**: A unified async function that handles both new message sends and inline edits. This ensures that the state (Chat Mode, Active Workspace) is always visually consistent.
-- **Instant Navigation**: Workspace selection callbacks trigger an immediate transition to the dashboard, minimizing the number of clicks required for common tasks.
-- **Contextual Markers**: When a user clicks "Continue Conversation", the system appends a hidden `--- CONTEXT FOLLOW-UP ---` marker to the message buffer. This allows the AI Agent to automatically detect which conversation the user is referring to without needing explicit repetition.
-
-## 🌳 Menu Navigation Tree
-
-AG-Uplink uses a tiered navigation system to manage state while maintaining a high-density UI:
-
-```mermaid
-graph TD
-    M["/menu (Main Dashboard)"] --> W["📂 Select Workspace"]
-    M --> CH["💬 Conversation Hub"]
-    M --> NC["🚀 New Conversation"]
-    M --> FT["🗣️ Toggle Remote Chat"]
-    
-    W --> WS["List of Workspaces (from workspaces.txt)"]
-    WS -->|Selection| M
-    
-    CH --> CD["Conversation Details (Active/Done)"]
-    CD --> IL["Request/Response Logs (History)"]
-    CD --> CF["🔁 Continue Conversation"]
-    CD -->|Back| CH
-    
-    IL --> DV["Log Detail View (Files, Summary, Content)"]
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                         telegravity process                           │
+│                                                                       │
+│   ┌────────────────┐                ┌──────────────────────────────┐  │
+│   │  MCP server    │  ◄── stdio ──► │       Any MCP client         │  │
+│   │  (FastMCP)     │                │ Antigravity · Claude Code …  │  │
+│   │                │                └──────────────────────────────┘  │
+│   └──────┬─────────┘                                                  │
+│          │                                                            │
+│          ▼                                                            │
+│   ┌────────────────────────────────────────────────────┐              │
+│   │              StateManager  (asyncio.Lock)          │              │
+│   │  • message buffer       • conversations DB          │             │
+│   │  • workspace list       • agent heartbeat           │             │
+│   │  • user-state machine   • last_ai_index             │             │
+│   └────────────────┬───────────────────────────────────┘              │
+│                    ▲                                                  │
+│                    │                                                  │
+│   ┌────────────────┴─────────────┐                                    │
+│   │  Telegram polling worker     │   ◄── HTTPS ──►  Telegram Bot API  │
+│   │  • AuthGate filter           │                                    │
+│   │  • Router (commands/cb)      │                                    │
+│   │  • Messenger (send/edit)     │                                    │
+│   │  • PendingRegistry (confirm) │                                    │
+│   └──────────────────────────────┘                                    │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-### Navigation Rules:
-1. **The Root (`/menu`)**: Always provides the absolute state (Active Workspace & Chat Mode).
-2. **Instant Redirection**: Any selection in the **Workspace** tree immediately pops the user back to the **Root** to confirm the change.
-3. **Log Depth**: Interaction logs are sequestered behind the **Conversation Hub** to keep the dashboard clean.
+## Package layout
 
-## 🪟 Sidebar vs. Remote Hub
+```
+telegravity/
+├── __init__.py
+├── __main__.py            # `python -m telegravity`
+├── __version__.py
+├── config.py              # env loading + validation (Config dataclass)
+├── paths.py               # data-dir resolution (lazy, env-overridable)
+├── state.py               # StateManager (single source of truth)
+├── auth.py                # AuthGate (single-user filter)
+├── formatting.py          # MarkdownV2 escape, badges, timestamps
+├── mcp_tools.py           # FastMCP tool definitions + Gateway binding
+├── server.py              # entrypoint: wires bot + state + MCP + workers
+└── ui/
+    ├── messenger.py       # send-or-edit menus, manages stale message IDs
+    ├── pending.py         # PendingRegistry (TTL token store for confirms)
+    ├── executor.py        # gated shell + safe_read_file
+    ├── views.py           # screen renderers → (text, InlineKeyboardMarkup)
+    └── router.py          # command + callback routing
+```
 
-A common point of confusion is why AG-Uplink conversations do not appear in the **IDE Sidebar**:
+## Lifecycle
 
-1. **IDE Sidebar (Local)**: This is controlled by Antigravity's native project management. It tracks the current session's "Task Boundaries".
-2. **Conversation Hub (Remote)**: This is the **Permanent Project Record**. It stores the full history of interactions, technical summaries, and remote commands across all time.
-3. **The Sync**: When you send an instruction on Telegram, it appears in your **IDE Inbox** (top left). When I (the Agent) act on it, I create a *Local Task* in the sidebar that matches your *Remote Conversation*.
+`telegravity.server.run()` orchestrates startup:
 
-*Essentially: The Sidebar is my "Active Desk", while the Hub is the "Project Archive".*
+1. Load `Config` (raises `ConfigError` with a friendly message if invalid).
+2. Build `StateManager` (loads `data/state.json`, conversations, logs).
+3. Build `Bot`, `AuthGate`, `Messenger`, `PendingRegistry`, `Router`.
+4. Bind the MCP `Gateway` so the tools can reach bot/state/config.
+5. Register slash commands with Telegram.
+6. Send the startup card to the authorized chat.
+7. Spawn `_poll_loop` (Telegram updates) and `_watch_workspaces` (hot
+   reload).
+8. Hand stdin/stdout to FastMCP's stdio loop. Shutdown cancels the workers.
 
----
-*Technical Documentation generated by Antigravity.*
+## Message flow
+
+### User → Agent (passive)
+
+```
+user types "fix the bug"
+        │
+        ▼
+poll_loop ──► AuthGate ──► Router.handle_message
+                              │
+                              ▼
+                       state.add_message
+                              │
+                              ▼
+       (no-op until agent calls a tool)
+
+agent calls check_telegram_updates  ──►  state.drain_messages
+                                              │
+                                              ▼
+                                       returns ["[12:34] user: fix the bug"]
+```
+
+### User → Agent (Active Mode)
+
+```
+agent calls wait_for_remote_instruction(300)
+        │
+        ▼
+state.wait_for_messages   (asyncio.Event.wait)
+        ▲
+        │     state.add_message fires NEW_MESSAGE_EVENT.set()
+        │
+user types in Telegram
+```
+
+Agent returns from the long-poll the instant the event fires.
+
+### Agent → User
+
+`send_message`, `update_conversation`, and `register_agent_activity` all push
+to Telegram via the Bot API and (for the first two) also write to the local
+activity log + state.
+
+## State model
+
+A single `StateManager` owns:
+
+- `workspaces: list[str]` — projects, loaded from `INITIAL_WORKSPACES` ∪
+  `data/workspaces.txt`. Hot-reloaded on file change.
+- `conversations: dict[str, list[Conversation]]` — per-workspace threads,
+  each with `interactions: list[Interaction]` (title, summary, files, steps,
+  content, time).
+- `message_buffer: list[str]` — ring buffer (configurable via
+  `Config.BUFFER_LIMIT`, default 200).
+- `last_ai_index: int` — cursor into the buffer; advances each time the agent
+  drains messages.
+- `agent: AgentHeartbeat` — last `status` and `detail` posted via
+  `register_agent_activity`. Used by `render_dashboard`.
+- `user_state: str` — small FSM for multi-step dialogs (waiting for a shell
+  command, file path, agent prompt, new-conv title).
+- `pending` (kept separately on the `Router`) — token-keyed dict of confirm
+  prompts with TTL.
+
+All mutating operations on the buffer go through an `asyncio.Lock` so the
+Telegram worker and the MCP coroutines cannot race on `last_ai_index`.
+
+## Security boundaries
+
+- **Inbound auth**: `AuthGate.message_allowed` / `callback_allowed` compare
+  `from_user.id` to `Config.authorized_chat_id`. Mismatches log an INFO line
+  with the scanning chat_id and are silently dropped.
+- **Shell exec**: opt-in (`ENABLE_SHELL_EXEC=1`). Every command is held in
+  `PendingRegistry` for up to 60s and only runs after the user taps ✅.
+  Output is truncated to 1500 chars per stream. 30s subprocess timeout.
+- **File view**: opt-in. `safe_read_file` resolves the path relative to
+  `Path.cwd()` and verifies the resolved path is still inside CWD via
+  `Path.relative_to`. Rejects symlink escapes, directories, and files larger
+  than 256 KB.
+- **No outbound calls** besides Telegram and MCP stdio. No telemetry.
+
+## UI ergonomics
+
+- `Messenger.send_menu` tries `edit_message_text` first (so the dashboard
+  feels instantaneous when tapping inline buttons), falls back to delete +
+  send when that's not possible.
+- `views.*` return `(text, InlineKeyboardMarkup)` pairs — each screen is one
+  function, easy to A/B without touching the router.
+- `formatting.md2` escapes MarkdownV2 specials so user-supplied text
+  (workspace names, conversation titles, file paths) never breaks rendering.
+- The activity feed and conversation steps share a consistent badge palette
+  (`🟢 active`, `⚡ executing`, `✅ done`, `❌ error`, `💭 thinking`).
+
+## Extending
+
+- **New screen**: add a `render_*` function in `ui/views.py` and a callback
+  branch in `ui/router.py`.
+- **New MCP tool**: add to `telegravity/mcp_tools.py`. The `_gw()` helper
+  gives you `bot`, `state`, `config`.
+- **New workspace source**: extend `StateManager._load_workspaces` (e.g. read
+  from a config file, a git submodule, …).

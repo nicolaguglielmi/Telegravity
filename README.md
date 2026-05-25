@@ -1,82 +1,193 @@
-# 🛰️ AG-Uplink: Antigravity Remote Command Center
+# 🛰️ Telegravity
 
-AG-Uplink is a high-performance **Model Context Protocol (MCP)** server that transforms Telegram into a professional command center for AI Agents (like Antigravity). It provides a seamless, stateful bridge for remote project management, real-time logging, and interactive instructions.
+> *Chat-control for any MCP agent.*
+> The orbital uplink between Telegram and your AI coding agent —
+> works with **Antigravity**, **Claude Code**, **Cursor**, **Cline**, **Zed Agent**,
+> or anything else that speaks the Model Context Protocol.
 
-## 🚀 Premium Features
+Telegravity is a single-binary MCP server that turns Telegram into a remote
+cockpit for your AI coding agent. It exposes a tiny set of tools the agent
+calls to pull your instructions, post live status updates, and stream
+conversation history — while the Telegram side gives you a polished
+dashboard, conversation hub, and an *Active Mode* that wakes the agent the
+instant you type.
 
-### 📡 Remote Interaction Hub
-*   **Chat Mode**: Toggle "Remote Chat" with a single click to forward standard Telegram messages directly to your AI Agent as prioritized instructions.
-*   **Context-Aware Follow-ups**: Targeted "Continue Conversation" interactions that preserve context without requiring you to re-explain the workspace or objective.
-*   **Real-time Activity Stream**: Monitor command processing and agent "thoughts" via the integrated activity log.
+## ✨ What you get
 
-### 💬 Conversation-Centric Model
-*   **Hierarchical Organization**: Manage complex work via **Workspaces -> Conversations -> Interactions**.
-*   **Real-time Agent Feedback**: Get instant notifications when the Agent "Takes Charge" of a command and when a task is completed.
-*   **Rich Technical Logs**: Deep-dive into specific request/response pairs with structured summaries, file lists, and progress milestones—mimicking the full Antigravity experience.
-*   **Interactive Navigation**: A high-density dashboard with instant transitions and hot-loaded workspace configurations.
+- **Wow-effect onboarding** — first `/start` runs a four-step guided tour
+- **Live dashboard** with agent heartbeat (`💭 Thinking · ⚡ Executing · ✅ Done`),
+  unread inbox counter, current workspace, and chat-mode badge
+- **Conversation hub** — per-thread history with interaction logs, files
+  touched, and step counters
+- **Active Mode** — `wait_for_remote_instruction` long-polls so the agent
+  reacts to your Telegram messages in milliseconds
+- **Single-user lockdown** — only your authorized `chat_id` can drive the bot
+- **Confirm-to-execute** shell and file-view actions (opt-in and jailed)
+- **MarkdownV2 throughout** — user-supplied text never breaks the layout
 
-### 🛡️ Built for Reliability
-*   **Automatic Data Migration**: Seamlessly upgrades legacy models to the new conversation-centric structure.
-*   **Persistent State**: Your active workspace, chat mode, and message history are preserved across server restarts via encrypted-ready JSON storage.
-*   **Non-Blocking Architecture**: High-volume Telegram polling designed to never interfere with IDE performance.
+## 🚀 Install
 
-## 🛠️ Quick Start
+```bash
+pip install telegravity
+```
 
-### Prerequisites
-*   Python 3.11+
-*   A Telegram Bot Token (from [@BotFather](https://t.me/botfather))
+or, from source:
 
-### Setup
-1.  **Clone & Configure**:
-    Create a `.env` file in the project root:
-    ```env
-    TELEGRAM_TOKEN=your_bot_token
-    CHAT_ID=your_telegram_id
-    INITIAL_WORKSPACES=AG-Uplink,AI-Radar
-    ```
-2.  **Add to MCP Configuration**:
-    Add the gateway to your Antigravity `mcp_config.json`:
-    ```json
-    "AG-Uplink": {
-      "command": "podman",
-      "args": [
-        "run", "-i", "--rm",
-        "-v", ":/app:Z",
-        "--env-file", ".env",
-        "telegram-mcp-gateway"
-      ]
+```bash
+git clone https://github.com/yourusername/telegravity.git
+cd telegravity
+pip install -e .
+```
+
+## 🔑 Configure
+
+Create a `.env` in the project where you want to run the agent:
+
+```env
+# Required
+TELEGRAM_TOKEN=123456:ABC...           # from @BotFather
+AUTHORIZED_CHAT_ID=123456789           # ask @userinfobot on Telegram
+
+# Optional
+INITIAL_WORKSPACES=MyApp,SideProject
+ENABLE_SHELL_EXEC=0                    # 1 to allow gated subprocess from chat
+ENABLE_FILE_VIEW=0                     # 1 to allow gated file reads from chat
+# TELEGRAVITY_DATA_DIR=/abs/path       # default ./data
+```
+
+## 🧩 Wire to your MCP client
+
+Add this to your MCP configuration. The block name (`telegravity` here) is
+arbitrary — the *command* is what matters.
+
+<details open>
+<summary><b>Antigravity</b> — <code>mcp_config.json</code></summary>
+
+```json
+{
+  "mcpServers": {
+    "telegravity": {
+      "command": "telegravity",
+      "env": {
+        "TELEGRAM_TOKEN": "...",
+        "AUTHORIZED_CHAT_ID": "..."
+      }
     }
-    ```
-3.  **Install requirements**: `pip install -r requirements.txt` (for local development)
-4.  **Launch your IDE** and start interacting via Telegram!
+  }
+}
+```
+</details>
 
-## 🔄 Typical Workflow
+<details>
+<summary><b>Claude Code</b> — <code>~/.claude.json</code> (or per-project <code>.mcp.json</code>)</summary>
 
-1.  **Select Workspace**: Use `/menu` -> **📂 Select Workspace** to set your project context.
-2.  **Start Work**: In your IDE (Antigravity), the agent will see your active workspace and can begin work.
-3.  **Monitor Progress**: Check **💬 Conversation Hub** to see live technical reports and interaction logs.
-4.  **Remote Follow-up**: 
-    *   Click **🔁 Continue this Conversation** on any interaction.
-    *   Type your next instruction (e.g., *"Now add a login page"*).
-    *   The Agent will pull this message and execute the next step automatically.
+```json
+{
+  "mcpServers": {
+    "telegravity": {
+      "command": "telegravity",
+      "env": {
+        "TELEGRAM_TOKEN": "...",
+        "AUTHORIZED_CHAT_ID": "..."
+      }
+    }
+  }
+}
+```
 
-### 🌳 Dashboard Navigation
-The interface is structured for speed:
-`Main Dashboard` ➔ `Workspace Select` ➔ `Dashboard` ➔ `Conversation Hub` ➔ `Interaction Logs`.
+Or one-liner: `claude mcp add telegravity -e TELEGRAM_TOKEN=... -e AUTHORIZED_CHAT_ID=... -- telegravity`
+</details>
 
-> [!NOTE]
-> **Sidebar vs. Hub**: The native IDE sidebar tracks current "Active Work". The **AG-Uplink Hub** is your permanent, searchable archive of all remote interactions. I pull your Telegram messages from the **Inbox** to start new work!
+<details>
+<summary><b>Cursor / Cline / Zed Agent</b></summary>
 
-*For a full visual map, see [ARCHITECTURE.md:L81-120]
+All three read the same MCP server schema. Drop the block above into the
+client's MCP settings file. Refer to your IDE docs for the exact path.
+</details>
 
-> [!TIP]
-> **Pro-Tip: Active Mode**
-> To avoid needing a local "nudge", ask me to **"Enter Active Mode"**. I will then use long-polling (`wait_for_remote_instruction`) to stay awake and process your Telegram messages the *instant* they arrive.
+If you installed in a venv and the `telegravity` command isn't on `PATH`,
+either point `command` at `/abs/path/to/venv/bin/telegravity` or use
+`python -m telegravity`.
 
-## ⌨️ Command Reference
-*   `/menu` - Open the **AG-Uplink Agent Dashboard**.
-*   `/conversations` - Browse the **Conversation Hub** for the active project.
-*   `/workspaces` - Switch your focus between different project areas.
-*   `/chat` - Toggle Remote Chat mode for direct AI instructions.
+## 🎮 Use it
 
----
+1. Open the chat with your bot and send `/start` — welcome card + 30-second
+   tour show up.
+2. Pick a workspace from the dashboard.
+3. In your IDE, ask the agent to *"enter Active Mode"*. It will call
+   `wait_for_remote_instruction` and stay parked, waking on every Telegram
+   message you send.
+4. Type your instruction in Telegram. The agent picks it up, processes it,
+   calls `update_conversation` and `register_agent_activity` along the way,
+   and finishes with `send_message`. Each step animates the dashboard.
+
+### Slash commands
+
+| Command            | Action                              |
+| ------------------ | ----------------------------------- |
+| `/menu`            | Open the dashboard                  |
+| `/conversations`   | Open the conversation hub           |
+| `/workspaces`      | Switch workspace                    |
+| `/chat`            | Toggle Chat Mode                    |
+| `/activity`        | Show the activity feed              |
+| `/reload`          | Re-read `data/workspaces.txt`       |
+| `/help`            | Show the welcome card               |
+
+## 🔧 MCP tools exposed to the agent
+
+| Tool                              | Purpose                                                                |
+| --------------------------------- | ---------------------------------------------------------------------- |
+| `check_telegram_updates()`        | Drain buffered Telegram messages since last call                        |
+| `wait_for_remote_instruction(t)`  | Long-poll up to `t` seconds for the next user message — *Active Mode*   |
+| `send_message(text)`              | Push a message from agent → user                                        |
+| `register_agent_activity(...)`    | Heartbeat for the dashboard (`thinking` / `executing` / `done` / …)     |
+| `get_state()`                     | Compact snapshot of workspace, active conv, recent buffer               |
+| `update_conversation(...)`        | Add a rich interaction log (title, summary, files, progress, content)   |
+| `import_conversations(ws, [...])` | Bulk-seed conversation titles (idempotent)                              |
+
+Plus the resource `telegram://inbox` for read-only buffer access.
+
+## ⚠️ Limitations to know
+
+- **MCP is reactive.** Your agent only calls these tools when it's running.
+  Without Active Mode, Telegram messages sit in the buffer until the agent
+  thinks again. Use `wait_for_remote_instruction` for instant pickup.
+- **One Telegram identity.** This is a *single-user* tool by design — the
+  whole security model leans on the `AUTHORIZED_CHAT_ID` filter.
+- **One bot, one process.** The bot uses long-poll `get_updates`; running
+  two copies against the same token will cause Telegram-side conflicts.
+- **No transport encryption claim.** State lives as JSON under `data/`.
+  Don't store secrets in conversation titles or summaries.
+
+## 🛡️ Security model
+
+- Every inbound update is filtered against `AUTHORIZED_CHAT_ID`.
+  Unauthorized senders are logged and silently ignored.
+- Shell exec and file viewing are *off* by default. When enabled they go
+  through a tap-to-confirm prompt with a 60-second TTL; file reads are
+  jailed to the current working directory.
+- The Telegram bot token never leaves the process. No outbound network
+  calls besides Telegram and the MCP transport (stdio).
+
+## 🧪 Develop
+
+```bash
+pip install -e ".[dev]"
+pytest                # full suite + coverage report + 90% threshold
+```
+
+Run the package directly:
+
+```bash
+python -m telegravity
+```
+
+Tests: **177 passing · 95% coverage · branch coverage on**.
+
+## 📐 Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the deep dive.
+
+## 📜 License
+
+MIT.

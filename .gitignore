@@ -1,20 +1,39 @@
-# System files
+# System
 .DS_Store
 Thumbs.db
 
-# Environment variables
+# Secrets
 .env
+.env.local
+.env.*.local
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
 
-# State and persistence
+# Virtualenvs
+venv/
+.venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime data (state, conversations, logs) — generated per-user
+data/
+*.log
 state.json
 conversations.json
 tasks.json
 workspaces.txt
-
-# Logs
-*.log
+startup.log

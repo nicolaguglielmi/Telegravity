@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling>=1.20"]
+build-backend = "hatchling.build"
+
+[project]
+name = "telegravity"
+dynamic = ["version"]
+description = "Chat-control for any MCP agent. The orbital uplink between Telegram and your AI coding agent."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Nicola" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "telegram",
+    "telegram-bot",
+    "ai-agent",
+    "claude",
+    "cursor",
+    "antigravity",
+    "remote-control",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "mcp[fastmcp]>=0.1.0",
+    "python-telegram-bot>=21.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.14.0",
+    "pytest-cov>=5.0.0",
+    "pytest-timeout>=2.3.0",
+    "coverage>=7.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/telegravity"
+Issues = "https://github.com/yourusername/telegravity/issues"
+
+[project.scripts]
+telegravity = "telegravity.server:main"
+
+[tool.hatch.version]
+path = "telegravity/__version__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["telegravity"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 15
+filterwarnings = [
+    # __main__ test triggers runpy's harmless "found in sys.modules" warning
+    "ignore:.*found in sys.modules after import.*:RuntimeWarning",
+]
+addopts = [
+    "--strict-markers",
+    "--cov=telegravity",
+    "--cov-report=term-missing",
+    "--cov-fail-under=90",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["telegravity"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+skip_covered = false
+show_missing = true
