@@ -3,13 +3,16 @@ import os
 from pathlib import Path
 
 
-def test_data_dir_defaults_to_cwd(monkeypatch, tmp_path):
+def test_data_dir_defaults_to_home(monkeypatch, tmp_path):
+    # No override + an arbitrary cwd (as an MCP client would launch us) must
+    # still land on a fixed, writable per-user location — never ``cwd/data``.
     monkeypatch.delenv("TELEGRAVITY_DATA_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     import telegravity.paths as paths
 
     importlib.reload(paths)
-    assert paths.DATA_DIR == tmp_path / "data"
+    assert paths.DATA_DIR == tmp_path / ".telegravity"
 
 
 def test_data_dir_env_override(monkeypatch, tmp_path):

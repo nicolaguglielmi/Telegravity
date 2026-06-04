@@ -52,7 +52,7 @@ AUTHORIZED_CHAT_ID=123456789           # ask @userinfobot on Telegram
 INITIAL_WORKSPACES=MyApp,SideProject
 ENABLE_SHELL_EXEC=0                    # 1 to allow gated subprocess from chat
 ENABLE_FILE_VIEW=0                     # 1 to allow gated file reads from chat
-# TELEGRAVITY_DATA_DIR=/abs/path       # default ./data
+# TELEGRAVITY_DATA_DIR=/abs/path       # default ~/.telegravity
 ```
 
 ## 🧩 Wire to your MCP client
@@ -109,6 +109,11 @@ If you installed in a venv and the `telegravity` command isn't on `PATH`,
 either point `command` at `/abs/path/to/venv/bin/telegravity` or use
 `python -m telegravity`.
 
+Runtime data (state, conversations, logs, workspace list) is written to
+`~/.telegravity` by default — no working directory required, so the config
+above works out of the box. Set `TELEGRAVITY_DATA_DIR` in the `env` block to
+relocate it.
+
 ## 🎮 Use it
 
 1. Open the chat with your bot and send `/start` — welcome card + 30-second
@@ -130,7 +135,7 @@ either point `command` at `/abs/path/to/venv/bin/telegravity` or use
 | `/workspaces`      | Switch workspace                    |
 | `/chat`            | Toggle Chat Mode                    |
 | `/activity`        | Show the activity feed              |
-| `/reload`          | Re-read `data/workspaces.txt`       |
+| `/reload`          | Re-read `workspaces.txt`            |
 | `/help`            | Show the welcome card               |
 
 ## 🔧 MCP tools exposed to the agent
@@ -156,7 +161,8 @@ Plus the resource `telegram://inbox` for read-only buffer access.
   whole security model leans on the `AUTHORIZED_CHAT_ID` filter.
 - **One bot, one process.** The bot uses long-poll `get_updates`; running
   two copies against the same token will cause Telegram-side conflicts.
-- **No transport encryption claim.** State lives as JSON under `data/`.
+- **No transport encryption claim.** State lives as JSON under `~/.telegravity/`
+  (or your `TELEGRAVITY_DATA_DIR`).
   Don't store secrets in conversation titles or summaries.
 
 ## 🛡️ Security model

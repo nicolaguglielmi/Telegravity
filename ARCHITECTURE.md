@@ -7,7 +7,8 @@ Telegravity is a single Python process that does two things concurrently:
 2. **Telegram bot** — long-polls `getUpdates` and renders the chat UI.
 
 Both share an in-memory `StateManager` (with an `asyncio.Lock` around the
-mutating bits) and persist to a `data/` directory.
+mutating bits) and persist to a data directory (`~/.telegravity` by default,
+overridable with `TELEGRAVITY_DATA_DIR`).
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
