@@ -112,12 +112,52 @@ async def test_poll_loop_rejects_unauthorized_callback(fake_bot, router, config)
 
 
 @pytest.mark.asyncio
-async def test_poll_loop_returns_on_conflict(fake_bot, router, config):
+async def test_poll_loop_retries_on_conflict(fake_bot, router, config, monkeypatch):
+    """A transient Conflict must NOT kill the worker — it backs off and retries."""
     auth = AuthGate(config.authorized_chat_id)
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(server.asyncio, "sleep", fake_sleep)
     fake_bot.get_updates.side_effect = Conflict("already polling")
 
-    await asyncio.wait_for(server._poll_loop(fake_bot, auth, router), timeout=1)
-    # Returned cleanly, no exception escaped
+    task = asyncio.create_task(server._poll_loop(fake_bot, auth, router))
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    # Backed off to retry instead of returning permanently.
+    assert sleeps and sleeps[0] >= 1.0
+
+
+@pytest.mark.asyncio
+async def test_poll_loop_recovers_after_conflict(fake_bot, router, config, monkeypatch):
+    """After the rival poller exits, the worker resumes and dispatches updates."""
+    auth = AuthGate(config.authorized_chat_id)
+    update = _mk_update(1, message_text="/menu", user_id=config.authorized_chat_id)
+    fake_bot.get_updates.side_effect = [
+        Conflict("already polling"),  # rival is briefly polling
+        [update],                      # rival gone — our poll succeeds
+        asyncio.CancelledError(),      # stop the loop
+    ]
+
+    async def fast_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(server.asyncio, "sleep", fast_sleep)
+
+    with patch.object(router, "handle_message") as handle:
+        task = asyncio.create_task(server._poll_loop(fake_bot, auth, router))
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    handle.assert_awaited_once()  # the update after the conflict was processed
 
 
 @pytest.mark.asyncio

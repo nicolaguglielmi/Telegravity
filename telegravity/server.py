@@ -56,6 +56,7 @@ async def _poll_loop(bot: Bot, auth: AuthGate, router: Router) -> None:
     offset = 0
     logger.info("Polling worker started")
     backoff = 1.0
+    conflict_backoff = 1.0
     while True:
         try:
             updates = await bot.get_updates(
@@ -64,6 +65,7 @@ async def _poll_loop(bot: Bot, auth: AuthGate, router: Router) -> None:
                 allowed_updates=["message", "callback_query"],
             )
             backoff = 1.0
+            conflict_backoff = 1.0
             for upd in updates:
                 offset = upd.update_id + 1
                 try:
@@ -79,11 +81,19 @@ async def _poll_loop(bot: Bot, auth: AuthGate, router: Router) -> None:
                 except Exception:
                     logger.exception("Error handling update %s", upd.update_id)
         except Conflict as exc:
-            logger.error(
-                "Telegram conflict — another instance is polling: %s. Exiting.",
+            # Another process briefly grabbed the long-poll — common when an MCP
+            # client (Antigravity, Cursor, …) restarts or transiently duplicates
+            # the server. Don't give up permanently: back off and retry so we
+            # resume polling once the rival exits. (Run a single instance to
+            # avoid the churn entirely.)
+            logger.warning(
+                "Telegram conflict — another instance is polling: %s "
+                "(retrying in %.1fs)",
                 exc,
+                conflict_backoff,
             )
-            return
+            await asyncio.sleep(conflict_backoff)
+            conflict_backoff = min(conflict_backoff * 2, 15)
         except asyncio.CancelledError:
             logger.info("Polling worker cancelled")
             return
