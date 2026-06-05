@@ -89,9 +89,7 @@ class Router:
         # Selection
         if data.startswith("select:"):
             workspace = data.split(":", 1)[1]
-            self.state.current_workspace = workspace
-            self.state.active_conversation_index = None
-            self.state.save_state()
+            self.state.select_workspace(workspace)
             await query.answer(f"📍 {workspace}")
             await self._render(views.render_dashboard(self.state, self.config), chat_id, edit_query=query)
             return
@@ -303,7 +301,15 @@ class Router:
             return
 
     async def _forward_to_agent(self, text: str, chat_id: int, sender: str) -> None:
-        msg = f"[{now_str()}] 👤 {sender}: {text}"
+        ws = self.state.current_workspace
+        root = self.state.workspace_root()
+        if ws and root:
+            tag = f" (workspace={ws}, dir={root})"
+        elif ws:
+            tag = f" (workspace={ws})"
+        else:
+            tag = ""
+        msg = f"[{now_str()}] 👤 {sender}{tag}: {text}"
         await self.state.add_message(msg)
         await self.messenger.send_plain(
             chat_id,
@@ -323,7 +329,9 @@ class Router:
         chat_id = query.message.chat_id
         try:
             code, stdout, stderr = await executor.run_shell(
-                pending.payload, timeout=self.config.SHELL_TIMEOUT_SEC
+                pending.payload,
+                timeout=self.config.SHELL_TIMEOUT_SEC,
+                cwd=self.state.workspace_root(),
             )
             text = executor.format_shell_result(pending.payload, code, stdout, stderr)
         except asyncio.TimeoutError:
@@ -346,7 +354,9 @@ class Router:
         await query.answer("Opening…")
         chat_id = query.message.chat_id
         try:
-            language, content = executor.safe_read_file(pending.payload)
+            language, content = executor.safe_read_file(
+                pending.payload, root=self.state.workspace_root()
+            )
             text = executor.format_file_view(pending.payload, language, content)
         except executor.FileViewError as exc:
             text = f"❌ {md2(str(exc))}"

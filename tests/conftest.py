@@ -22,6 +22,16 @@ def _isolated_cwd(tmp_path, monkeypatch):
     yield tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _no_autoimport(monkeypatch):
+    """Hermetic by default: never auto-import the developer's real Antigravity
+    projects, and ignore any host-set workspace env. Tests that exercise
+    auto-import opt back in with a tmp dir."""
+    monkeypatch.setenv("TELEGRAVITY_AUTOIMPORT", "0")
+    monkeypatch.delenv("TELEGRAVITY_PROJECTS_DIR", raising=False)
+    monkeypatch.delenv("TELEGRAVITY_WORKSPACE_BASE", raising=False)
+
+
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch) -> Path:
     target = tmp_path / "data"
@@ -41,6 +51,12 @@ def config(monkeypatch):
     monkeypatch.delenv("CHAT_ID", raising=False)
     monkeypatch.setenv("ENABLE_SHELL_EXEC", "0")
     monkeypatch.setenv("ENABLE_FILE_VIEW", "0")
+    monkeypatch.setenv("ENABLE_FILE_WRITE", "0")
+    # Keep tests hermetic: never auto-import the developer's real Antigravity
+    # projects, and ignore any host-set workspace env.
+    monkeypatch.setenv("TELEGRAVITY_AUTOIMPORT", "0")
+    monkeypatch.delenv("TELEGRAVITY_PROJECTS_DIR", raising=False)
+    monkeypatch.delenv("TELEGRAVITY_WORKSPACE_BASE", raising=False)
     from telegravity.config import Config
 
     return Config.load()

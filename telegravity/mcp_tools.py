@@ -7,6 +7,7 @@ makes the lifecycle obvious.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import List, Optional
@@ -19,6 +20,7 @@ from telegram.error import TelegramError
 from .config import Config
 from .formatting import md2, now_str
 from .state import StateManager
+from .ui import executor
 
 logger = logging.getLogger(__name__)
 
@@ -108,13 +110,102 @@ async def get_state() -> str:
     ):
         active = conversations[state.active_conversation_index]["desc"]
     history = "\n".join(state.recent_messages(10))
+    root = state.workspace_root()
+    ws_list = ", ".join(state.workspaces) or "(none)"
     return (
         f"WORKSPACE: {state.current_workspace or '(none)'}\n"
+        f"WORKSPACE_DIR: {root or '(no directory — selection is label-only)'}\n"
         f"ACTIVE CONVERSATION: {active}\n"
-        f"CHAT_MODE: {state.chat_mode}\n\n"
+        f"CHAT_MODE: {state.chat_mode}\n"
+        f"AVAILABLE WORKSPACES: {ws_list}\n\n"
         f"CONVERSATIONS:\n{conv_lines}\n\n"
         f"RECENT BUFFER:\n{history}"
     )
+
+
+@mcp.tool()
+async def set_active_workspace(name: str) -> str:
+    """Set the active workspace (the project the user wants you to work on).
+
+    ``name`` must be one of the known workspaces (see AVAILABLE WORKSPACES in
+    get_state). Returns the resolved directory so you know exactly where to
+    operate — this is how a Telegram workspace selection 'takes effect'.
+    """
+    state = _gw().state
+    if not state.select_workspace(name):
+        known = ", ".join(state.workspaces) or "(none)"
+        return f"ERROR: unknown workspace '{name}'. Known: {known}"
+    root = state.workspace_root()
+    if root:
+        return f"OK: active workspace '{name}' -> {root}"
+    return f"OK: active workspace '{name}' (no directory mapped; exec/file tools unavailable)"
+
+
+@mcp.tool()
+async def run_command(command: str, timeout_sec: int = 30) -> str:
+    """Run a shell command IN THE SELECTED WORKSPACE's directory; return output.
+
+    Gated by ENABLE_SHELL_EXEC. Runs with cwd = the active workspace's path, so
+    it acts on the project chosen from Telegram even when the IDE has a
+    different folder open. Requires a workspace with a mapped directory.
+    """
+    gw = _gw()
+    if not gw.config.enable_shell_exec:
+        return "ERROR: shell execution disabled (set ENABLE_SHELL_EXEC=1)"
+    root = gw.state.workspace_root()
+    if not root:
+        return "ERROR: no workspace directory selected — call set_active_workspace first"
+    timeout = max(1, min(int(timeout_sec), 300))
+    try:
+        code, out, err = await executor.run_shell(command, timeout=timeout, cwd=root)
+    except asyncio.TimeoutError:
+        return f"ERROR: command timed out after {timeout}s (cwd={root})"
+    parts = [f"exit={code} cwd={root}"]
+    if out:
+        parts.append(f"stdout:\n{out}")
+    if err:
+        parts.append(f"stderr:\n{err}")
+    return "\n\n".join(parts)
+
+
+@mcp.tool()
+async def read_file(rel_path: str) -> str:
+    """Read a file from the SELECTED workspace (path jailed to its directory).
+
+    Gated by ENABLE_FILE_VIEW. ``rel_path`` is relative to the active
+    workspace's path.
+    """
+    gw = _gw()
+    if not gw.config.enable_file_view:
+        return "ERROR: file view disabled (set ENABLE_FILE_VIEW=1)"
+    root = gw.state.workspace_root()
+    if not root:
+        return "ERROR: no workspace directory selected — call set_active_workspace first"
+    try:
+        _lang, content = executor.safe_read_file(rel_path, root=root)
+    except executor.FileViewError as exc:
+        return f"ERROR: {exc}"
+    return content
+
+
+@mcp.tool()
+async def write_file(rel_path: str, content: str) -> str:
+    """Write a file into the SELECTED workspace (path jailed to its directory).
+
+    Gated by ENABLE_FILE_WRITE. ``rel_path`` is relative to the active
+    workspace's path; parent directories are created as needed.
+    """
+    gw = _gw()
+    if not gw.config.enable_file_write:
+        return "ERROR: file write disabled (set ENABLE_FILE_WRITE=1)"
+    root = gw.state.workspace_root()
+    if not root:
+        return "ERROR: no workspace directory selected — call set_active_workspace first"
+    try:
+        abs_path = executor.safe_write_file(rel_path, content, root=root)
+    except executor.FileViewError as exc:
+        return f"ERROR: {exc}"
+    return f"OK: wrote {abs_path}"
 
 
 @mcp.tool()

@@ -49,6 +49,7 @@ telegravity/
 ├── config.py              # env loading + validation (Config dataclass)
 ├── paths.py               # data-dir resolution (lazy, env-overridable)
 ├── state.py               # StateManager (single source of truth)
+├── workspaces.py          # workspace discovery: label -> real project path
 ├── auth.py                # AuthGate (single-user filter)
 ├── formatting.py          # MarkdownV2 escape, badges, timestamps
 ├── mcp_tools.py           # FastMCP tool definitions + Gateway binding
@@ -56,10 +57,23 @@ telegravity/
 └── ui/
     ├── messenger.py       # send-or-edit menus, manages stale message IDs
     ├── pending.py         # PendingRegistry (TTL token store for confirms)
-    ├── executor.py        # gated shell + safe_read_file
+    ├── executor.py        # gated shell + jailed read/write (workspace-rooted)
     ├── views.py           # screen renderers → (text, InlineKeyboardMarkup)
     └── router.py          # command + callback routing
 ```
+
+## Workspaces (path-aware)
+
+A workspace is a label **plus an optional real directory**. `workspaces.py`
+resolves labels → paths by merging Antigravity's project registry
+(`~/.gemini/config/projects/*.json`, auto-imported), `INITIAL_WORKSPACES`,
+`workspaces.txt` (`Label=/abs/path` or bare `Label`), and an optional
+`TELEGRAVITY_WORKSPACE_BASE`. `StateManager.workspace_root()` returns the active
+workspace's directory. MCP can't tell the IDE to switch projects, so the path is
+instead delivered to the agent: queued instructions are tagged
+`(workspace=…, dir=…)`, `get_state()` reports `WORKSPACE_DIR`, and the
+`run_command` / `read_file` / `write_file` tools run **jailed to that directory**
+— letting a remote selection take effect regardless of the IDE's open folder.
 
 ## Lifecycle
 

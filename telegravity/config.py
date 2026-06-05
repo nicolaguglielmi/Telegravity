@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
 
 from dotenv import find_dotenv, load_dotenv
@@ -32,6 +33,12 @@ class Config:
     initial_workspaces: List[str] = field(default_factory=list)
     enable_shell_exec: bool = False
     enable_file_view: bool = False
+    enable_file_write: bool = False
+    # Auto-import workspaces from Antigravity's project registry, give bare
+    # labels a path under ``workspace_base``, and where that registry lives.
+    autoimport_projects: bool = True
+    projects_dir: str = ""
+    workspace_base: str = ""
 
     BUFFER_LIMIT: int = 200
     SHELL_TIMEOUT_SEC: int = 30
@@ -73,10 +80,18 @@ class Config:
         workspaces_raw = os.environ.get("INITIAL_WORKSPACES", "")
         workspaces = [w.strip() for w in workspaces_raw.split(",") if w.strip()]
 
+        default_projects_dir = str(Path.home() / ".gemini" / "config" / "projects")
+        projects_dir = (os.environ.get("TELEGRAVITY_PROJECTS_DIR") or default_projects_dir).strip()
+        workspace_base = (os.environ.get("TELEGRAVITY_WORKSPACE_BASE") or "").strip()
+
         return cls(
             telegram_token=token,
             authorized_chat_id=chat_id,
             initial_workspaces=workspaces,
             enable_shell_exec=_truthy(os.environ.get("ENABLE_SHELL_EXEC")),
             enable_file_view=_truthy(os.environ.get("ENABLE_FILE_VIEW")),
+            enable_file_write=_truthy(os.environ.get("ENABLE_FILE_WRITE")),
+            autoimport_projects=_truthy(os.environ.get("TELEGRAVITY_AUTOIMPORT"), default=True),
+            projects_dir=projects_dir,
+            workspace_base=workspace_base,
         )

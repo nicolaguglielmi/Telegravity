@@ -21,8 +21,14 @@ instant you type.
   touched, and step counters
 - **Active Mode** — `wait_for_remote_instruction` long-polls so the agent
   reacts to your Telegram messages in milliseconds
+- **Path-aware workspaces** — pick a project in Telegram and the agent is told
+  its real directory (auto-imported from Antigravity's project registry);
+  queued instructions arrive tagged with the target path
+- **Agent execution, scoped to the workspace** — `run_command` / `read_file` /
+  `write_file` run jailed to the selected project's directory, so a remote
+  selection takes effect even when a different folder is open in the IDE (opt-in)
 - **Single-user lockdown** — only your authorized `chat_id` can drive the bot
-- **Confirm-to-execute** shell and file-view actions (opt-in and jailed)
+- **Confirm-to-execute** shell and file-view actions from the dashboard too
 - **MarkdownV2 throughout** — user-supplied text never breaks the layout
 
 ## 🚀 Install
@@ -118,13 +124,18 @@ relocate it.
 
 1. Open the chat with your bot and send `/start` — welcome card + 30-second
    tour show up.
-2. Pick a workspace from the dashboard.
-3. In your IDE, ask the agent to *"enter Active Mode"*. It will call
-   `wait_for_remote_instruction` and stay parked, waking on every Telegram
-   message you send.
-4. Type your instruction in Telegram. The agent picks it up, processes it,
-   calls `update_conversation` and `register_agent_activity` along the way,
-   and finishes with `send_message`. Each step animates the dashboard.
+2. Pick a workspace from the dashboard — the project you want the agent to work
+   on. Workspaces (and their real directories) are auto-imported from
+   Antigravity's project registry; add your own in `workspaces.txt`.
+3. In your IDE, install the bundled [`SKILL.md`](SKILL.md) (Active Mode) and ask
+   the agent to *"enter Active Mode"*. It calls `wait_for_remote_instruction`,
+   parks, and wakes on every Telegram message.
+4. Type your instruction in Telegram. It arrives tagged with the workspace's
+   directory; the agent works there — using its own tools, or Telegravity's
+   workspace-rooted `run_command` / `read_file` / `write_file` when the chosen
+   project isn't the folder open in the IDE — reports back with `send_message`,
+   and animates the dashboard via `update_conversation` /
+   `register_agent_activity`.
 
 ### Slash commands
 
@@ -146,7 +157,11 @@ relocate it.
 | `wait_for_remote_instruction(t)`  | Long-poll up to `t` seconds for the next user message — *Active Mode*   |
 | `send_message(text)`              | Push a message from agent → user                                        |
 | `register_agent_activity(...)`    | Heartbeat for the dashboard (`thinking` / `executing` / `done` / …)     |
-| `get_state()`                     | Compact snapshot of workspace, active conv, recent buffer               |
+| `get_state()`                     | Compact snapshot of workspace, its directory, conversations, buffer     |
+| `set_active_workspace(name)`      | Switch the active workspace (the project to work on)                    |
+| `run_command(cmd, timeout_sec)`   | Run a shell command in the active workspace's dir (`ENABLE_SHELL_EXEC`)  |
+| `read_file(rel_path)`             | Read a file under the active workspace (`ENABLE_FILE_VIEW`)             |
+| `write_file(rel_path, content)`   | Write a file under the active workspace (`ENABLE_FILE_WRITE`)           |
 | `update_conversation(...)`        | Add a rich interaction log (title, summary, files, progress, content)   |
 | `import_conversations(ws, [...])` | Bulk-seed conversation titles (idempotent)                              |
 
@@ -157,6 +172,11 @@ Plus the resource `telegram://inbox` for read-only buffer access.
 - **MCP is reactive.** Your agent only calls these tools when it's running.
   Without Active Mode, Telegram messages sit in the buffer until the agent
   thinks again. Use `wait_for_remote_instruction` for instant pickup.
+- **Telegravity can't switch the IDE's open folder.** No MCP primitive can
+  redirect Antigravity to another project. Instead the selected workspace's
+  *path* is handed to the agent, and `run_command` / `read_file` / `write_file`
+  operate on that directory — so a remote workspace selection takes effect even
+  when a different folder is open in the IDE.
 - **One Telegram identity.** This is a *single-user* tool by design — the
   whole security model leans on the `AUTHORIZED_CHAT_ID` filter.
 - **One bot, one process.** The bot uses long-poll `get_updates`; running

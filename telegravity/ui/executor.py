@@ -10,7 +10,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 from ..config import Config
 from ..formatting import code_block, inline_code, md2, truncate_block
@@ -18,12 +18,19 @@ from ..formatting import code_block, inline_code, md2, truncate_block
 logger = logging.getLogger(__name__)
 
 
-async def run_shell(command: str, timeout: int) -> Tuple[int, str, str]:
-    """Run ``command`` in a subprocess, return ``(returncode, stdout, stderr)``."""
+async def run_shell(
+    command: str, timeout: int, cwd: Optional[str] = None
+) -> Tuple[int, str, str]:
+    """Run ``command`` in a subprocess, return ``(returncode, stdout, stderr)``.
+
+    ``cwd`` sets the working directory (the selected workspace's path). When
+    None the subprocess inherits the server's CWD.
+    """
     proc = await asyncio.create_subprocess_shell(
         command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
     )
     try:
         stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -56,14 +63,20 @@ class FileViewError(Exception):
     pass
 
 
-def safe_read_file(path_str: str) -> Tuple[str, str]:
-    """Read a file, jailed to CWD. Returns ``(language_hint, content)``."""
-    root = Path.cwd().resolve()
-    candidate = (root / path_str).resolve()
+def _jail(path_str: str, root: Optional[str]) -> Path:
+    """Resolve ``path_str`` under ``root`` (defaults to CWD), refusing escapes."""
+    base = Path(root).resolve() if root else Path.cwd().resolve()
+    candidate = (base / path_str).resolve()
     try:
-        candidate.relative_to(root)
+        candidate.relative_to(base)
     except ValueError as exc:
-        raise FileViewError("Path escapes the project tree.") from exc
+        raise FileViewError("Path escapes the workspace tree.") from exc
+    return candidate
+
+
+def safe_read_file(path_str: str, root: Optional[str] = None) -> Tuple[str, str]:
+    """Read a file, jailed to ``root`` (defaults to CWD). Returns ``(lang, content)``."""
+    candidate = _jail(path_str, root)
     if not candidate.exists():
         raise FileViewError(f"File not found: {path_str}")
     if not candidate.is_file():
@@ -73,6 +86,19 @@ def safe_read_file(path_str: str) -> Tuple[str, str]:
     text = candidate.read_text(encoding="utf-8", errors="replace")
     lang = candidate.suffix.lstrip(".") or ""
     return lang, text
+
+
+def safe_write_file(path_str: str, content: str, root: Optional[str] = None) -> str:
+    """Write ``content`` to a file jailed to ``root`` (defaults to CWD).
+
+    Creates parent directories as needed. Returns the absolute path written.
+    """
+    candidate = _jail(path_str, root)
+    if candidate.is_dir():
+        raise FileViewError(f"Is a directory: {path_str}")
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text(content, encoding="utf-8")
+    return str(candidate)
 
 
 def format_file_view(rel_path: str, language: str, content: str) -> str:

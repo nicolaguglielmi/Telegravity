@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from . import paths as _paths
 from .config import Config
 from .paths import ensure_data_dir
+from .workspaces import resolve_workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,9 @@ class StateManager:
     def __init__(self, config: Config):
         self.config = config
         self.workspaces: List[str] = []
+        self.workspace_paths: Dict[str, str] = {}
         self.current_workspace: Optional[str] = None
+        self.current_workspace_path: Optional[str] = None
         self.conversations: Dict[str, List[Dict[str, Any]]] = {}
         self.message_buffer: List[str] = []
         self.chat_mode: bool = False
@@ -79,6 +83,13 @@ class StateManager:
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
+    @staticmethod
+    def _atomic_write(path, text: str) -> None:
+        """Write via temp file + os.replace so a crash mid-write can't truncate."""
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(text)
+        os.replace(tmp, path)
+
     def _load_state(self) -> None:
         if not _paths.STATE_FILE.exists():
             return
@@ -88,6 +99,7 @@ class StateManager:
             logger.error("Failed to load state.json: %s", exc)
             return
         self.current_workspace = data.get("current_workspace")
+        self.current_workspace_path = data.get("current_workspace_path")
         self.chat_mode = data.get("chat_mode", False)
         self.last_ai_index = data.get("last_index", 0)
         self.active_conversation_index = data.get("active_conversation")
@@ -99,6 +111,7 @@ class StateManager:
         ensure_data_dir()
         payload = {
             "current_workspace": self.current_workspace,
+            "current_workspace_path": self.current_workspace_path,
             "chat_mode": self.chat_mode,
             "last_index": self.last_ai_index,
             "active_conversation": self.active_conversation_index,
@@ -108,7 +121,7 @@ class StateManager:
         }
         with self._sync_lock:
             try:
-                _paths.STATE_FILE.write_text(json.dumps(payload, indent=2))
+                self._atomic_write(_paths.STATE_FILE, json.dumps(payload, indent=2))
             except Exception as exc:
                 logger.error("Failed to save state.json: %s", exc)
 
@@ -131,23 +144,41 @@ class StateManager:
         ensure_data_dir()
         with self._sync_lock:
             try:
-                _paths.CONVERSATIONS_FILE.write_text(json.dumps(self.conversations, indent=2))
+                self._atomic_write(
+                    _paths.CONVERSATIONS_FILE, json.dumps(self.conversations, indent=2)
+                )
             except Exception as exc:
                 logger.error("Failed to save conversations: %s", exc)
 
     def _load_workspaces(self) -> None:
-        ws: set[str] = set(self.config.initial_workspaces)
-        if _paths.WORKSPACES_FILE.exists():
-            try:
-                for line in _paths.WORKSPACES_FILE.read_text().splitlines():
-                    if line.strip():
-                        ws.add(line.strip())
-            except Exception as exc:
-                logger.error("Failed reading %s: %s", _paths.WORKSPACES_FILE, exc)
-        self.workspaces = sorted(ws)
+        self.workspaces, self.workspace_paths = resolve_workspaces(
+            self.config.initial_workspaces,
+            _paths.WORKSPACES_FILE,
+            self.config.projects_dir,
+            autoimport=self.config.autoimport_projects,
+            base_dir=self.config.workspace_base or None,
+        )
+
+    def workspace_root(self) -> Optional[str]:
+        """Absolute path of the active workspace, or None if it has no directory."""
+        if self.current_workspace and self.current_workspace in self.workspace_paths:
+            return self.workspace_paths[self.current_workspace]
+        return self.current_workspace_path
+
+    def select_workspace(self, name: str) -> bool:
+        """Set the active workspace if known. Returns False for unknown labels."""
+        if name not in self.workspaces:
+            return False
+        self.current_workspace = name
+        self.current_workspace_path = self.workspace_paths.get(name)
+        self.active_conversation_index = None
+        self.save_state()
+        return True
 
     def reload_workspaces(self) -> int:
         self._load_workspaces()
+        if self.current_workspace and self.current_workspace in self.workspace_paths:
+            self.current_workspace_path = self.workspace_paths[self.current_workspace]
         return len(self.workspaces)
 
     def _load_logs(self) -> None:
