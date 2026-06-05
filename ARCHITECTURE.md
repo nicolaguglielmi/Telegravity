@@ -136,8 +136,10 @@ activity log + state.
 
 A single `StateManager` owns:
 
-- `workspaces: list[str]` — projects, loaded from `INITIAL_WORKSPACES` ∪
-  `data/workspaces.txt`. Hot-reloaded on file change.
+- `workspaces: list[str]` + `workspace_paths: dict[str, str]` — projects and
+  their real directories, resolved from Antigravity's auto-imported project
+  registry, `INITIAL_WORKSPACES`, `data/workspaces.txt` (`Label=/path` or bare
+  `Label`), and an optional `TELEGRAVITY_WORKSPACE_BASE`. Hot-reloaded on change.
 - `conversations: dict[str, list[Conversation]]` — per-workspace threads,
   each with `interactions: list[Interaction]` (title, summary, files, steps,
   content, time).
@@ -160,13 +162,16 @@ Telegram worker and the MCP coroutines cannot race on `last_ai_index`.
 - **Inbound auth**: `AuthGate.message_allowed` / `callback_allowed` compare
   `from_user.id` to `Config.authorized_chat_id`. Mismatches log an INFO line
   with the scanning chat_id and are silently dropped.
-- **Shell exec**: opt-in (`ENABLE_SHELL_EXEC=1`). Every command is held in
-  `PendingRegistry` for up to 60s and only runs after the user taps ✅.
-  Output is truncated to 1500 chars per stream. 30s subprocess timeout.
-- **File view**: opt-in. `safe_read_file` resolves the path relative to
-  `Path.cwd()` and verifies the resolved path is still inside CWD via
-  `Path.relative_to`. Rejects symlink escapes, directories, and files larger
-  than 256 KB.
+- **Shell exec**: opt-in (`ENABLE_SHELL_EXEC=1`). The dashboard flow holds each
+  command in `PendingRegistry` for up to 60s and runs only after the user taps
+  ✅; the `run_command` MCP tool runs without a tap. Both run with `cwd` set to
+  the selected workspace directory. Output truncated to 1500 chars/stream.
+- **File read/write**: opt-in (`ENABLE_FILE_VIEW` / `ENABLE_FILE_WRITE`).
+  `safe_read_file` / `safe_write_file` resolve the path under the selected
+  workspace directory (`Path.cwd()` as fallback) and verify it stays inside via
+  `Path.relative_to` — `.resolve()` collapses symlinks first, so in-tree
+  symlinks pointing outside are rejected, as are `..` escapes, directories, and
+  (for reads) files larger than 256 KB.
 - **No outbound calls** besides Telegram and MCP stdio. No telemetry.
 
 ## UI ergonomics

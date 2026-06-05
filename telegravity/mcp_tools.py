@@ -160,6 +160,8 @@ async def run_command(command: str, timeout_sec: int = 30) -> str:
         code, out, err = await executor.run_shell(command, timeout=timeout, cwd=root)
     except asyncio.TimeoutError:
         return f"ERROR: command timed out after {timeout}s (cwd={root})"
+    except OSError as exc:
+        return f"ERROR: {exc} (cwd={root})"
     parts = [f"exit={code} cwd={root}"]
     if out:
         parts.append(f"stdout:\n{out}")
@@ -185,6 +187,8 @@ async def read_file(rel_path: str) -> str:
         _lang, content = executor.safe_read_file(rel_path, root=root)
     except executor.FileViewError as exc:
         return f"ERROR: {exc}"
+    except OSError as exc:
+        return f"ERROR: {exc}"
     return content
 
 
@@ -204,6 +208,8 @@ async def write_file(rel_path: str, content: str) -> str:
     try:
         abs_path = executor.safe_write_file(rel_path, content, root=root)
     except executor.FileViewError as exc:
+        return f"ERROR: {exc}"
+    except OSError as exc:
         return f"ERROR: {exc}"
     return f"OK: wrote {abs_path}"
 

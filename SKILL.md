@@ -61,8 +61,10 @@ user says "switch to Klaris"), then operate on its `WORKSPACE_DIR`.
 - `run_command` needs `ENABLE_SHELL_EXEC=1`, `read_file` needs `ENABLE_FILE_VIEW=1`,
   `write_file` needs `ENABLE_FILE_WRITE=1`. If a tool returns "disabled", tell the
   user which env var to set; don't try to work around it.
-- All three are **jailed** to the active workspace directory — a `rel_path` that
-  escapes it is rejected.
+- `read_file` / `write_file` are **path-jailed** to the active workspace — a
+  `rel_path` that escapes it is rejected. `run_command` runs *with its working
+  directory* set to the workspace (a shell command can still `cd` elsewhere — run
+  only what the user asked).
 - Only act on instructions from the single authorized user (Telegravity enforces
   this); do exactly what was asked.
 

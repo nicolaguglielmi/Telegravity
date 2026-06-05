@@ -89,8 +89,10 @@ class Router:
         # Selection
         if data.startswith("select:"):
             workspace = data.split(":", 1)[1]
-            self.state.select_workspace(workspace)
-            await query.answer(f"📍 {workspace}")
+            if self.state.select_workspace(workspace):
+                await query.answer(f"📍 {workspace}")
+            else:
+                await query.answer("⚠ Workspace no longer available")
             await self._render(views.render_dashboard(self.state, self.config), chat_id, edit_query=query)
             return
 

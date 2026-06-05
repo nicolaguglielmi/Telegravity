@@ -1,7 +1,12 @@
-"""Gated executors: shell command + file viewer.
+"""Gated executors: shell command + jailed file read/write.
 
-Both are opt-in (``ENABLE_SHELL_EXEC`` / ``ENABLE_FILE_VIEW``) and always run
-through a tap-to-confirm flow. File reads are jailed to ``Path.cwd()``.
+These helpers back BOTH the Telegram tap-to-confirm flow and the direct MCP
+tools (``run_command`` / ``read_file`` / ``write_file``) — the MCP tools run
+without a tap, gated only by ``ENABLE_SHELL_EXEC`` / ``ENABLE_FILE_VIEW`` /
+``ENABLE_FILE_WRITE``. ``run_shell`` runs with ``cwd`` set to the active
+workspace directory; ``safe_read_file`` / ``safe_write_file`` are path-jailed to
+a ``root`` (the workspace directory), falling back to ``Path.cwd()`` when no
+workspace is selected.
 """
 
 from __future__ import annotations

@@ -56,8 +56,11 @@ AUTHORIZED_CHAT_ID=123456789           # ask @userinfobot on Telegram
 
 # Optional
 INITIAL_WORKSPACES=MyApp,SideProject
-ENABLE_SHELL_EXEC=0                    # 1 to allow gated subprocess from chat
-ENABLE_FILE_VIEW=0                     # 1 to allow gated file reads from chat
+ENABLE_SHELL_EXEC=0                    # 1 to allow run_command + chat shell
+ENABLE_FILE_VIEW=0                     # 1 to allow read_file + chat file view
+ENABLE_FILE_WRITE=0                    # 1 to allow the agent's write_file tool
+# TELEGRAVITY_AUTOIMPORT=1             # auto-import Antigravity projects (default on)
+# TELEGRAVITY_WORKSPACE_BASE=/abs/dir  # give bare labels a path under <base>/<label>
 # TELEGRAVITY_DATA_DIR=/abs/path       # default ~/.telegravity
 ```
 
@@ -146,7 +149,7 @@ relocate it.
 | `/workspaces`      | Switch workspace                    |
 | `/chat`            | Toggle Chat Mode                    |
 | `/activity`        | Show the activity feed              |
-| `/reload`          | Re-read `workspaces.txt`            |
+| `/reload`          | Re-scan all workspace sources       |
 | `/help`            | Show the welcome card               |
 
 ## 🔧 MCP tools exposed to the agent
@@ -189,9 +192,12 @@ Plus the resource `telegram://inbox` for read-only buffer access.
 
 - Every inbound update is filtered against `AUTHORIZED_CHAT_ID`.
   Unauthorized senders are logged and silently ignored.
-- Shell exec and file viewing are *off* by default. When enabled they go
-  through a tap-to-confirm prompt with a 60-second TTL; file reads are
-  jailed to the current working directory.
+- Shell exec and file read/write are *off* by default (`ENABLE_SHELL_EXEC` /
+  `ENABLE_FILE_VIEW` / `ENABLE_FILE_WRITE`). The dashboard's shell/file actions
+  go through a tap-to-confirm prompt with a 60-second TTL. `read_file` /
+  `write_file` are path-jailed to the selected workspace directory (the current
+  working directory only as a fallback); `run_command` runs with its `cwd` set
+  to that directory.
 - The Telegram bot token never leaves the process. No outbound network
   calls besides Telegram and the MCP transport (stdio).
 
@@ -208,7 +214,7 @@ Run the package directly:
 python -m telegravity
 ```
 
-Tests: **177 passing · 95% coverage · branch coverage on**.
+Tests: **210 passing · 93% coverage (90% enforced) · branch coverage on**.
 
 ## 📐 Architecture
 

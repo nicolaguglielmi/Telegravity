@@ -177,8 +177,14 @@ class StateManager:
 
     def reload_workspaces(self) -> int:
         self._load_workspaces()
-        if self.current_workspace and self.current_workspace in self.workspace_paths:
-            self.current_workspace_path = self.workspace_paths[self.current_workspace]
+        if self.current_workspace and self.current_workspace not in self.workspaces:
+            # The selected workspace vanished from every source — drop it so the
+            # exec/file tools don't keep targeting a stale directory.
+            self.current_workspace = None
+            self.current_workspace_path = None
+            self.save_state()
+        elif self.current_workspace:
+            self.current_workspace_path = self.workspace_paths.get(self.current_workspace)
         return len(self.workspaces)
 
     def _load_logs(self) -> None:

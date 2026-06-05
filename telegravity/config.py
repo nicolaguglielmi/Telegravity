@@ -21,7 +21,7 @@ class ConfigError(RuntimeError):
 
 
 def _truthy(raw: str | None, default: bool = False) -> bool:
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on", "y"}
 
