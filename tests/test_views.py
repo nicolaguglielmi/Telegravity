@@ -1,6 +1,5 @@
 """Renderers should produce deterministic Markdown + button layouts."""
 
-import pytest
 from telegram import InlineKeyboardMarkup
 
 from telegravity.ui import views
@@ -282,13 +281,3 @@ def test_file_confirm_buttons():
     assert "file_ok:tok456" in cbs
 
 
-def test_followup_captured():
-    text, markup = views.render_followup_captured("Build feature")
-    assert "Build feature" in text
-    assert "ui_menu" in _callback_data(markup)
-
-
-def test_unauthorized_has_no_markup():
-    text, markup = views.render_unauthorized()
-    assert "single" in text
-    assert markup is None

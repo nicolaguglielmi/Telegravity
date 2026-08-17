@@ -8,7 +8,7 @@ stay self-contained — easy to read, easy to tweak.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -147,7 +147,7 @@ def render_dashboard(state: StateManager, config: Config) -> Tuple[str, InlineKe
         f"💼 *Workspace* `{md2(state.current_workspace)}`",
         f"🎯 *Focus*     `{md2(focus)}`",
         f"{chat_icon} *Chat mode* `{chat_label}`",
-        f"📥 *Inbox*     `{inbox} new`" if inbox else f"📥 *Inbox*     _empty_",
+        f"📥 *Inbox*     `{inbox} new`" if inbox else "📥 *Inbox*     _empty_",
     ]
 
     rows = [
@@ -477,26 +477,3 @@ def render_file_confirm(token: str, path: str) -> Tuple[str, InlineKeyboardMarku
         ]
     ]
     return text, InlineKeyboardMarkup(keyboard)
-
-
-# ---------------------------------------------------------------------------
-# Misc
-# ---------------------------------------------------------------------------
-def render_followup_captured(target: str) -> Tuple[str, InlineKeyboardMarkup]:
-    text = (
-        "🔁 *Context captured*\n"
-        f"{DIVIDER}\n"
-        f"Agent notified to resume work on `{md2(target)}`\\.\n\n"
-        "Type your next instruction below\\."
-    )
-    keyboard = [
-        [
-            InlineKeyboardButton("🏠 Dashboard", callback_data="ui_menu"),
-            InlineKeyboardButton("💬 Hub", callback_data="ui_conversations"),
-        ]
-    ]
-    return text, InlineKeyboardMarkup(keyboard)
-
-
-def render_unauthorized() -> Tuple[str, Optional[InlineKeyboardMarkup]]:
-    return ("🚫 This bot is in single\\-user mode and you're not the owner\\.", None)

@@ -1,24 +1,25 @@
 """Shared test fixtures.
 
-We point ``TELEGRAVITY_DATA_DIR`` at a fresh tmp dir for every test so the state
-manager's persistence machinery has somewhere to write without trampling real
-user data.
+Every test runs in a fresh tmp directory with ``TELEGRAVITY_DATA_DIR`` pinned
+under it, so neither a local ``.env`` in the developer's repo nor a real
+``~/.telegravity`` can leak into the suite.
 """
 
 from __future__ import annotations
 
-import importlib
-import os
 from pathlib import Path
 
 import pytest
 
+import telegravity.paths as paths
+
 
 @pytest.fixture(autouse=True)
 def _isolated_cwd(tmp_path, monkeypatch):
-    """Run every test in a fresh tmp directory so any local ``.env`` file in
-    the developer's repo cannot leak into ``Config.load()``."""
+    """Fresh cwd + per-test data dir; ``paths`` re-resolved to match."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TELEGRAVITY_DATA_DIR", str(tmp_path / "data"))
+    paths.refresh()
     yield tmp_path
 
 
@@ -33,15 +34,11 @@ def _no_autoimport(monkeypatch):
 
 
 @pytest.fixture
-def data_dir(tmp_path, monkeypatch) -> Path:
-    target = tmp_path / "data"
-    target.mkdir()
-    monkeypatch.setenv("TELEGRAVITY_DATA_DIR", str(target))
-    # Re-import paths so DATA_DIR re-resolves to our tmp dir.
-    import telegravity.paths as paths
-
-    importlib.reload(paths)
-    yield target
+def data_dir(_isolated_cwd) -> Path:
+    """The per-test data dir (already pinned by the autouse fixture)."""
+    target = paths.DATA_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 @pytest.fixture

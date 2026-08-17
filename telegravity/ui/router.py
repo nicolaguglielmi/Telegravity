@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 from telegram import Update
-from telegram.constants import ParseMode
-from telegram.error import TelegramError
 
 from ..config import Config
 from ..formatting import md2, now_str

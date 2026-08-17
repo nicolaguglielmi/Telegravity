@@ -209,7 +209,6 @@ async def test_watch_workspaces_reloads_on_change(state, data_dir, monkeypatch):
     import telegravity.paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "WORKSPACES_FILE", ws_file)
-    monkeypatch.setattr(server, "WORKSPACES_FILE", ws_file)
 
     call_count = {"n": 0}
     real_sleep = asyncio.sleep
@@ -240,7 +239,7 @@ async def test_watch_workspaces_handles_missing_file(state, monkeypatch):
     import telegravity.paths as paths_mod
 
     missing = paths_mod.WORKSPACES_FILE.parent / "no-such-file.txt"
-    monkeypatch.setattr(server, "WORKSPACES_FILE", missing)
+    monkeypatch.setattr(paths_mod, "WORKSPACES_FILE", missing)
 
     iterations = {"n": 0}
 
@@ -259,7 +258,7 @@ async def test_watch_workspaces_handles_missing_file(state, monkeypatch):
 @pytest.mark.asyncio
 async def test_send_startup_card_marks_agent_ready(fake_bot, state, config):
     messenger = Messenger(fake_bot, state)
-    await server._send_startup_card(fake_bot, messenger, state, config)
+    await server._send_startup_card(messenger, state, config)
     assert state.agent.status == "idle"
     fake_bot.send_message.assert_awaited()
 
@@ -269,7 +268,7 @@ async def test_send_startup_card_survives_telegram_error(fake_bot, state, config
     fake_bot.send_message.side_effect = TelegramError("offline")
     messenger = Messenger(fake_bot, state)
     # Should not raise.
-    await server._send_startup_card(fake_bot, messenger, state, config)
+    await server._send_startup_card(messenger, state, config)
 
 
 def test_main_handles_keyboard_interrupt(monkeypatch):

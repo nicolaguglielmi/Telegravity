@@ -1,7 +1,6 @@
 import asyncio
 import json
 
-import pytest
 
 import telegravity.paths as paths
 
@@ -115,20 +114,21 @@ def test_conversations_load_corrupt_file(state, data_dir):
     state._load_conversations()
 
 
-def test_legacy_tasks_migration(monkeypatch, data_dir, tmp_path):
-    """A pre-existing ``tasks.json`` in CWD should seed conversations."""
+def test_cwd_tasks_json_is_not_ingested(monkeypatch, data_dir, tmp_path):
+    """A ``tasks.json`` in CWD belongs to whatever project we were launched
+    from — it must never seed the conversations store."""
     monkeypatch.setenv("TELEGRAM_TOKEN", "t")
     monkeypatch.setenv("AUTHORIZED_CHAT_ID", "1")
     monkeypatch.delenv("CHAT_ID", raising=False)
-    legacy = tmp_path / "tasks.json"
-    legacy.write_text('{"Alpha": [{"desc": "legacy", "status": "active"}]}')
+    (tmp_path / "tasks.json").write_text(
+        '{"Alpha": [{"desc": "unrelated", "status": "active"}]}'
+    )
     # State is created with cwd already set by autouse fixture
     from telegravity.config import Config
     from telegravity.state import StateManager
 
     sm = StateManager(Config.load())
-    assert "Alpha" in sm.conversations
-    assert sm.conversations["Alpha"][0]["desc"] == "legacy"
+    assert sm.conversations == {}
 
 
 def test_recent_messages_returns_tail(state):
@@ -214,19 +214,6 @@ def test_load_logs_swallows_io_error(state, monkeypatch):
     monkeypatch.setattr(type(paths.ACTIVITY_LOG), "read_text", explode)
     # Should not raise
     state._load_logs()
-
-
-def test_legacy_migration_swallows_corrupt_legacy(monkeypatch, tmp_path):
-    monkeypatch.setenv("TELEGRAM_TOKEN", "t")
-    monkeypatch.setenv("AUTHORIZED_CHAT_ID", "1")
-    monkeypatch.delenv("CHAT_ID", raising=False)
-    (tmp_path / "tasks.json").write_text("not-json")
-    from telegravity.config import Config
-    from telegravity.state import StateManager
-
-    # Should not raise even though legacy file is corrupt.
-    sm = StateManager(Config.load())
-    assert sm.conversations == {}
 
 
 def test_workspaces_load_handles_unreadable_file(state, data_dir, monkeypatch):

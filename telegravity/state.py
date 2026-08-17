@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -72,7 +73,7 @@ class StateManager:
 
         self.new_message_event = asyncio.Event()
         self._lock = asyncio.Lock()
-        self._sync_lock = __import__("threading").Lock()
+        self._sync_lock = threading.Lock()
 
         ensure_data_dir()
         self._load_workspaces()
@@ -129,16 +130,8 @@ class StateManager:
         if _paths.CONVERSATIONS_FILE.exists():
             try:
                 self.conversations = json.loads(_paths.CONVERSATIONS_FILE.read_text())
-                return
             except Exception as exc:
                 logger.error("Failed to load conversations.json: %s", exc)
-        if _paths.LEGACY_TASKS_FILE.exists():
-            try:
-                self.conversations = json.loads(_paths.LEGACY_TASKS_FILE.read_text())
-                logger.info("Migrated legacy tasks.json into conversations store.")
-                self.save_conversations()
-            except Exception as exc:
-                logger.error("Legacy tasks migration failed: %s", exc)
 
     def save_conversations(self) -> None:
         ensure_data_dir()

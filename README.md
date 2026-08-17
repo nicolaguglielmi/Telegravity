@@ -40,14 +40,33 @@ pip install telegravity
 or, from source:
 
 ```bash
-git clone https://github.com/yourusername/telegravity.git
-cd telegravity
+git clone https://github.com/nicolaguglielmi/Telegravity.git
+cd Telegravity
 pip install -e .
 ```
 
+### Claude Code: one-step plugin install
+
+The repo doubles as a Claude Code plugin marketplace. After the `pip install`
+above, run inside Claude Code:
+
+```
+/plugin marketplace add nicolaguglielmi/Telegravity
+/plugin install telegravity@telegravity
+```
+
+That wires the MCP server, the *Active Mode* skill, and the
+`/telegravity:active-mode` command in one step — skip the manual MCP
+configuration below. Put your credentials in `~/.telegravity/.env` (see next
+section) so the server finds them no matter which project is open.
+
 ## 🔑 Configure
 
-Create a `.env` in the project where you want to run the agent:
+Create a `.env` in the project where you want to run the agent — or put it in
+`~/.telegravity/.env` to configure the server globally. The global file is
+always layered underneath: it fills in anything the environment and the
+project-local `.env` didn't set, so it works no matter which directory your
+MCP client launches the server from:
 
 ```env
 # Required
@@ -130,9 +149,11 @@ relocate it.
 2. Pick a workspace from the dashboard — the project you want the agent to work
    on. Workspaces (and their real directories) are auto-imported from
    Antigravity's project registry; add your own in `workspaces.txt`.
-3. In your IDE, install the bundled [`SKILL.md`](SKILL.md) (Active Mode) and ask
-   the agent to *"enter Active Mode"*. It calls `wait_for_remote_instruction`,
-   parks, and wakes on every Telegram message.
+3. In your IDE, install the bundled
+   [`SKILL.md`](skills/telegravity-active-mode/SKILL.md) (Active Mode) and ask
+   the agent to *"enter Active Mode"* — in Claude Code with the plugin
+   installed, just run `/telegravity:active-mode`. The agent calls
+   `wait_for_remote_instruction`, parks, and wakes on every Telegram message.
 4. Type your instruction in Telegram. It arrives tagged with the workspace's
    directory; the agent works there — using its own tools, or Telegravity's
    workspace-rooted `run_command` / `read_file` / `write_file` when the chosen
@@ -214,7 +235,8 @@ Run the package directly:
 python -m telegravity
 ```
 
-Tests: **210 passing · 93% coverage (90% enforced) · branch coverage on**.
+Tests: **226 passing · 93% coverage (90% enforced) · branch coverage on**.
+Compatible with MCP SDK 1.3+ and 2.x (`MCPServer`, with a `FastMCP` fallback).
 
 ## 📐 Architecture
 
@@ -222,4 +244,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the deep dive.
 
 ## 📜 License
 
-MIT.
+[MIT](LICENSE).

@@ -8,15 +8,20 @@ makes the lifecycle obvious.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
-from mcp.server.fastmcp import FastMCP
+try:  # mcp >= 2.0
+    from mcp.server import MCPServer
+except ImportError:  # mcp 1.x (>= 1.3) shipped the same class as FastMCP
+    from mcp.server.fastmcp import FastMCP as MCPServer
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
+from .__version__ import __version__
 from .config import Config
 from .formatting import md2, now_str
 from .state import StateManager
@@ -47,7 +52,23 @@ def _gw() -> Gateway:
     return _gateway
 
 
-mcp = FastMCP("Telegravity")
+_INSTRUCTIONS = (
+    "Bridge to the user's Telegram chat. Call check_telegram_updates() to drain "
+    "queued instructions, or wait_for_remote_instruction() to park until one "
+    "arrives (Active Mode). Instructions arrive tagged with the target workspace "
+    "and its directory — honor it. Report results back with send_message(), and "
+    "use get_state() to see the active workspace, conversations, and buffer."
+)
+
+# Probe the constructor instead of inferring capabilities from which import
+# succeeded — FastMCP (mcp 1.x) has no ``version`` parameter.
+_ctor_params = inspect.signature(MCPServer.__init__).parameters
+
+mcp = MCPServer(
+    "Telegravity",
+    instructions=_INSTRUCTIONS,
+    **({"version": __version__} if "version" in _ctor_params else {}),
+)
 
 
 def _quick_keyboard() -> InlineKeyboardMarkup:

@@ -16,7 +16,7 @@ overridable with `TELEGRAVITY_DATA_DIR`).
 │                                                                       │
 │   ┌────────────────┐                ┌──────────────────────────────┐  │
 │   │  MCP server    │  ◄── stdio ──► │       Any MCP client         │  │
-│   │  (FastMCP)     │                │ Antigravity · Claude Code …  │  │
+│   │  (MCPServer)   │                │ Antigravity · Claude Code …  │  │
 │   │                │                └──────────────────────────────┘  │
 │   └──────┬─────────┘                                                  │
 │          │                                                            │
@@ -52,7 +52,7 @@ telegravity/
 ├── workspaces.py          # workspace discovery: label -> real project path
 ├── auth.py                # AuthGate (single-user filter)
 ├── formatting.py          # MarkdownV2 escape, badges, timestamps
-├── mcp_tools.py           # FastMCP tool definitions + Gateway binding
+├── mcp_tools.py           # MCP tool definitions + Gateway binding
 ├── server.py              # entrypoint: wires bot + state + MCP + workers
 └── ui/
     ├── messenger.py       # send-or-edit menus, manages stale message IDs
@@ -87,7 +87,8 @@ instead delivered to the agent: queued instructions are tagged
 6. Send the startup card to the authorized chat.
 7. Spawn `_poll_loop` (Telegram updates) and `_watch_workspaces` (hot
    reload).
-8. Hand stdin/stdout to FastMCP's stdio loop. Shutdown cancels the workers.
+8. Hand stdin/stdout to the MCP SDK's stdio loop (`MCPServer`; `FastMCP`
+   on mcp 1.x). Shutdown cancels the workers.
 
 ## Message flow
 

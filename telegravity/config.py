@@ -15,6 +15,8 @@ from typing import List
 
 from dotenv import find_dotenv, load_dotenv
 
+from . import paths as _paths
+
 
 class ConfigError(RuntimeError):
     """Raised when required configuration is missing or invalid."""
@@ -52,6 +54,15 @@ class Config:
         dotenv_path = find_dotenv(usecwd=True)
         if dotenv_path:
             load_dotenv(dotenv_path)
+            _paths.refresh()
+        # Layer the global config (~/.telegravity/.env) underneath: with
+        # override left False it only fills keys that neither the real
+        # environment nor the project .env provided. An unrelated project's
+        # .env up the cwd chain therefore can't mask the global credentials —
+        # MCP clients launch the server from arbitrary directories.
+        if _paths.ENV_FILE.is_file():
+            load_dotenv(_paths.ENV_FILE)
+            _paths.refresh()
 
         token = (os.environ.get("TELEGRAM_TOKEN") or "").strip()
         if not token:

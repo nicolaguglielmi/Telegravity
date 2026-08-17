@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 
 def test_main_module_calls_server_main():
-    with patch("telegravity.server.main") as fake_main:
+    with patch("telegravity.server.main"):
         import importlib
         import telegravity.__main__ as m
 

@@ -10,12 +10,26 @@ location rather than ``cwd``-relative on purpose: MCP clients (Antigravity,
 Claude Code, Cursor, …) launch the server with an arbitrary working directory —
 often ``/`` — so a ``cwd``-relative default would crash on a read-only
 filesystem or scatter state across unrelated directories.
+
+``TELEGRAVITY_DATA_DIR`` may also be set in a ``.env`` file: the module
+resolves at import from the process environment, and ``Config.load()`` calls
+``refresh()`` after each ``load_dotenv`` so a value arriving from a ``.env``
+still takes effect. Access the constants via the module (``paths.DATA_DIR``),
+not ``from``-imports, or a refresh won't reach your copy.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+
+DATA_DIR: Path
+STATE_FILE: Path
+CONVERSATIONS_FILE: Path
+WORKSPACES_FILE: Path
+ACTIVITY_LOG: Path
+CONVERSATION_LOG: Path
+ENV_FILE: Path
 
 
 def _resolve_data_dir() -> Path:
@@ -25,16 +39,20 @@ def _resolve_data_dir() -> Path:
     return Path.home() / ".telegravity"
 
 
-DATA_DIR: Path = _resolve_data_dir()
+def refresh() -> None:
+    """Re-resolve every path from the current environment."""
+    global DATA_DIR, STATE_FILE, CONVERSATIONS_FILE, WORKSPACES_FILE
+    global ACTIVITY_LOG, CONVERSATION_LOG, ENV_FILE
+    DATA_DIR = _resolve_data_dir()
+    STATE_FILE = DATA_DIR / "state.json"
+    CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
+    WORKSPACES_FILE = DATA_DIR / "workspaces.txt"
+    ACTIVITY_LOG = DATA_DIR / "activity.log"
+    CONVERSATION_LOG = DATA_DIR / "conversations.log"
+    ENV_FILE = DATA_DIR / ".env"
 
-STATE_FILE: Path = DATA_DIR / "state.json"
-CONVERSATIONS_FILE: Path = DATA_DIR / "conversations.json"
-WORKSPACES_FILE: Path = DATA_DIR / "workspaces.txt"
-ACTIVITY_LOG: Path = DATA_DIR / "activity.log"
-CONVERSATION_LOG: Path = DATA_DIR / "conversations.log"
 
-# Legacy file in the project root — read once during migration if present.
-LEGACY_TASKS_FILE: Path = Path.cwd() / "tasks.json"
+refresh()
 
 
 def ensure_data_dir() -> None:

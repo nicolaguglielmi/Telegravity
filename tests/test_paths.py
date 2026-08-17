@@ -1,6 +1,4 @@
 import importlib
-import os
-from pathlib import Path
 
 
 def test_data_dir_defaults_to_home(monkeypatch, tmp_path):
@@ -45,3 +43,18 @@ def test_ensure_data_dir_idempotent(monkeypatch, tmp_path):
     # Should not raise even if dir already there
     paths.ensure_data_dir()
     paths.ensure_data_dir()
+
+
+def test_refresh_reresolves_every_constant(monkeypatch, tmp_path):
+    import telegravity.paths as paths
+
+    monkeypatch.setenv("TELEGRAVITY_DATA_DIR", str(tmp_path / "a"))
+    paths.refresh()
+    assert paths.DATA_DIR == (tmp_path / "a").resolve()
+    assert paths.ENV_FILE == paths.DATA_DIR / ".env"
+
+    monkeypatch.setenv("TELEGRAVITY_DATA_DIR", str(tmp_path / "b"))
+    paths.refresh()
+    assert paths.DATA_DIR == (tmp_path / "b").resolve()
+    assert paths.STATE_FILE == paths.DATA_DIR / "state.json"
+    assert paths.WORKSPACES_FILE == paths.DATA_DIR / "workspaces.txt"

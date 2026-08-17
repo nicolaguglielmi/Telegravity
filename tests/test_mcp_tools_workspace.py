@@ -2,7 +2,6 @@
 
 import asyncio
 import dataclasses
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 from telegravity import mcp_tools

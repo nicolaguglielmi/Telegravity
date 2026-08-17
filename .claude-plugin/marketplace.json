@@ -1,0 +1,15 @@
+{
+  "name": "telegravity",
+  "owner": {
+    "name": "Nicola Guglielmi",
+    "email": "45848139+nicolaguglielmi@users.noreply.github.com"
+  },
+  "plugins": [
+    {
+      "name": "telegravity",
+      "source": "./",
+      "description": "Drive your coding agent from Telegram: remote instructions, live dashboard, Active Mode, and workspace-scoped execution via the Telegravity MCP server.",
+      "category": "productivity"
+    }
+  ]
+}

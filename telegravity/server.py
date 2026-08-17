@@ -13,17 +13,16 @@ import os
 import sys
 from typing import Optional
 
-from telegram import Bot, BotCommand, Update
+from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Conflict, TelegramError
 
 from .__version__ import __version__
 from .auth import AuthGate
 from .config import Config, ConfigError
 from .formatting import md2
+from . import paths
 from .mcp_tools import Gateway, bind, mcp
-from .paths import WORKSPACES_FILE, ensure_data_dir
 from .state import StateManager
-from .ui import views
 from .ui.messenger import Messenger
 from .ui.pending import PendingRegistry
 from .ui.router import Router
@@ -111,8 +110,8 @@ async def _watch_workspaces(state: StateManager) -> None:
     last_mtime: Optional[float] = None
     while True:
         try:
-            if WORKSPACES_FILE.exists():
-                mtime = WORKSPACES_FILE.stat().st_mtime
+            if paths.WORKSPACES_FILE.exists():
+                mtime = paths.WORKSPACES_FILE.stat().st_mtime
                 if last_mtime is None or mtime > last_mtime:
                     state.reload_workspaces()
                     if last_mtime is not None:
@@ -126,15 +125,13 @@ async def _watch_workspaces(state: StateManager) -> None:
             await asyncio.sleep(10)
 
 
-async def _send_startup_card(bot: Bot, messenger: Messenger, state: StateManager, config: Config) -> None:
+async def _send_startup_card(messenger: Messenger, state: StateManager, config: Config) -> None:
     try:
         text = (
             "🟢 *Telegravity online* · "
             f"_v{md2(__version__)}_\n\n"
             "Tap below to open the dashboard\\."
         )
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
         markup = InlineKeyboardMarkup(
             [[InlineKeyboardButton("🚀 Open dashboard", callback_data="ui_menu")]]
         )
@@ -155,7 +152,7 @@ async def run() -> None:
         logger.error("Configuration error: %s", exc)
         sys.exit(2)
 
-    ensure_data_dir()
+    paths.ensure_data_dir()
     state = StateManager(config)
     bot = Bot(token=config.telegram_token)
     auth = AuthGate(config.authorized_chat_id)
@@ -170,7 +167,7 @@ async def run() -> None:
     except TelegramError as exc:
         logger.warning("Could not register bot commands: %s", exc)
 
-    await _send_startup_card(bot, messenger, state, config)
+    await _send_startup_card(messenger, state, config)
 
     poll_task = asyncio.create_task(_poll_loop(bot, auth, router), name="poll")
     watch_task = asyncio.create_task(_watch_workspaces(state), name="watch")
