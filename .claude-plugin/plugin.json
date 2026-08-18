@@ -5,7 +5,6 @@
   "description": "Drive your coding agent from Telegram: remote instructions, live dashboard, Active Mode, and workspace-scoped execution via the Telegravity MCP server.",
   "author": {
     "name": "Nicola Guglielmi",
-    "email": "45848139+nicolaguglielmi@users.noreply.github.com",
     "url": "https://github.com/nicolaguglielmi"
   },
   "homepage": "https://github.com/nicolaguglielmi/Telegravity",
