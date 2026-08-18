@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "telegravity",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Drive your coding agent from Telegram: remote instructions, live dashboard, Active Mode, and workspace-scoped execution via the Telegravity MCP server.",
   "author": {
     "name": "Nicola Guglielmi",

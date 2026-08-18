@@ -40,6 +40,23 @@ jobs:
         run: python -m pip install --upgrade build && python -m build
       - name: Check metadata
         run: python -m pip install --upgrade twine && twine check dist/*
+      - name: Scan artifacts for secrets and stray copies of the repo
+        run: |
+          mkdir -p _scan && tar -xzf dist/*.tar.gz -C _scan
+          fail=0
+          # An agent worktree or a nested checkout would ship the whole repo,
+          # including states we deliberately rewrote out of history.
+          if find _scan -type d \( -name ".claude" -o -name "worktrees" -o -name "data" \) | grep -q .; then
+            echo "::error::sdist contains a directory that must never ship"; fail=1
+          fi
+          if grep -rIEq "[A-Za-z0-9._%+-]+@(gmail|outlook|yahoo|hotmail)\.[a-z]+" _scan; then
+            echo "::error::sdist contains a personal email address"; fail=1
+          fi
+          if grep -rIEq "TELEGRAM_TOKEN[[:space:]]*=[[:space:]]*[0-9]{8,}:[A-Za-z0-9_-]{30,}" _scan; then
+            echo "::error::sdist contains what looks like a real bot token"; fail=1
+          fi
+          test "$fail" = "0" && echo "artifacts clean"
+          exit $fail
       - uses: actions/upload-artifact@v4
         with:
           name: dist

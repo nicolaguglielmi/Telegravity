@@ -21,6 +21,10 @@ venv/
 .venv/
 env/
 
+# Agent scratch space (worktrees here hold full copies of the repo —
+# they must never reach the sdist)
+.claude/
+
 # Tooling caches
 .pytest_cache/
 .mypy_cache/

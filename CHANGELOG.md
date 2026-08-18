@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — 2026-08-18
+
+### Changed
+- Maintainer contact now points at the GitHub profile and the issue tracker
+  instead of a plain-text email address in the package metadata and the
+  plugin manifests. Functionally identical to 0.3.0, which was removed from
+  PyPI; a published version can never be re-uploaded, hence the bump.
+
 ## 0.3.0 — 2026-08-06
 
 ### Fixed
