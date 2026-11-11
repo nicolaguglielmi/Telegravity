@@ -48,6 +48,7 @@ telegravity/
 ├── __version__.py
 ├── config.py              # env loading + validation (Config dataclass)
 ├── paths.py               # data-dir resolution (lazy, env-overridable)
+├── pollerlock.py          # single-poller election (flock on poller.lock)
 ├── state.py               # StateManager (single source of truth)
 ├── workspaces.py          # workspace discovery: label -> real project path
 ├── auth.py                # AuthGate (single-user filter)

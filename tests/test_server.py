@@ -9,6 +9,7 @@ from telegram.error import Conflict, TelegramError
 
 from telegravity import server
 from telegravity.auth import AuthGate
+from telegravity.pollerlock import PollerLock
 from telegravity.ui.messenger import Messenger
 from telegravity.ui.pending import PendingRegistry
 from telegravity.ui.router import Router
@@ -332,6 +333,132 @@ async def test_run_full_lifecycle(monkeypatch, config, data_dir):
 
     fake_bot.set_my_commands.assert_awaited()
     fake_bot.send_message.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Single-poller guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_poller_guard_polls_immediately_when_lock_free(monkeypatch, data_dir):
+    polled = asyncio.Event()
+
+    async def fake_poll(bot, auth, router):
+        polled.set()
+
+    monkeypatch.setattr(server, "_poll_loop", fake_poll)
+    lock = PollerLock()
+    try:
+        await asyncio.wait_for(
+            server._poller_guard(MagicMock(), MagicMock(), MagicMock(), lock),
+            timeout=2,
+        )
+    finally:
+        lock.release()
+    assert polled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_poller_guard_stands_by_then_takes_over(monkeypatch, data_dir, caplog):
+    """While a rival holds the lock: warn once, don't poll, retry — and take
+    over polling as soon as the rival exits."""
+    rival = PollerLock()
+    assert rival.try_acquire()
+
+    polled = []
+
+    async def fake_poll(bot, auth, router):
+        polled.append(True)
+
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        rival.release()  # the holder "dies" while we stand by
+
+    monkeypatch.setattr(server, "_poll_loop", fake_poll)
+    monkeypatch.setattr(server.asyncio, "sleep", fake_sleep)
+
+    lock = PollerLock()
+    try:
+        with caplog.at_level(logging.INFO, logger="telegravity"):
+            await asyncio.wait_for(
+                server._poller_guard(MagicMock(), MagicMock(), MagicMock(), lock),
+                timeout=2,
+            )
+    finally:
+        lock.release()
+        rival.release()
+
+    assert "another Telegravity instance owns the Telegram poller" in caplog.text
+    assert "taking over Telegram polling" in caplog.text
+    assert sleeps == [server.POLLER_LOCK_RETRY_SEC]
+    assert polled  # resumed polling after the takeover
+
+
+@pytest.mark.asyncio
+async def test_poller_guard_cancelled_while_standing_by(data_dir):
+    rival = PollerLock()
+    assert rival.try_acquire()
+    lock = PollerLock()
+    task = asyncio.create_task(
+        server._poller_guard(MagicMock(), MagicMock(), MagicMock(), lock)
+    )
+    await asyncio.sleep(0.05)  # let the guard park in its retry sleep
+    task.cancel()
+    await task  # swallows the cancel and returns cleanly
+    assert not lock.held
+    rival.release()
+
+
+@pytest.mark.asyncio
+async def test_run_stands_by_when_another_instance_holds_lock(
+    monkeypatch, config, data_dir, caplog
+):
+    """Full run(): a second instance must serve MCP without ever polling."""
+    rival = PollerLock()
+    assert rival.try_acquire()
+
+    fake_bot = _make_fake_bot()
+    monkeypatch.setattr(server, "Bot", MagicMock(return_value=fake_bot))
+
+    async def quick_stdio():
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(server.mcp, "run_stdio_async", quick_stdio)
+    monkeypatch.setattr(server.Config, "load", staticmethod(lambda: config))
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="telegravity"):
+            await asyncio.wait_for(server.run(), timeout=3)
+    finally:
+        rival.release()
+
+    fake_bot.get_updates.assert_not_awaited()
+    assert "another Telegravity instance owns the Telegram poller" in caplog.text
+    # The startup card still went out — the standby serves MCP normally.
+    fake_bot.send_message.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_releases_poller_lock_on_shutdown(monkeypatch, config, data_dir):
+    fake_bot = _make_fake_bot()
+    monkeypatch.setattr(server, "Bot", MagicMock(return_value=fake_bot))
+
+    async def quick_stdio():
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(server.mcp, "run_stdio_async", quick_stdio)
+    monkeypatch.setattr(server.Config, "load", staticmethod(lambda: config))
+
+    await asyncio.wait_for(server.run(), timeout=3)
+
+    probe = PollerLock()
+    try:
+        assert probe.try_acquire() is True  # run() dropped the lock on exit
+    finally:
+        probe.release()
 
 
 @pytest.mark.asyncio

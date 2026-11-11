@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Duplicate instances no longer fight over Telegram updates.** When two MCP
+  clients (e.g. the Antigravity hub and IDE, sharing one `mcp_config.json`)
+  each spawn `telegravity` with the same token, both used to long-poll
+  `getUpdates` — Telegram 409'd and updates were randomly split between the
+  processes, silently losing instructions. Now an advisory `flock` on
+  `<DATA_DIR>/poller.lock` elects a single poller: the holder polls as before;
+  a standby instance keeps serving MCP tools (`send_message` works, the
+  receive tools return an explanatory note instead of competing) and retries
+  the lock every 10 s so it takes over when the holder exits. POSIX-only
+  (`fcntl`); on Windows the guard is a no-op.
+
 ## 0.3.1 — 2026-08-18
 
 ### Changed

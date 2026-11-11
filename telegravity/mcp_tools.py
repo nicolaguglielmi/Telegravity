@@ -24,6 +24,7 @@ from telegram.error import TelegramError
 from .__version__ import __version__
 from .config import Config
 from .formatting import md2, now_str
+from .pollerlock import POLLER_LOCK_RETRY_SEC, PollerLock
 from .state import StateManager
 from .ui import executor
 
@@ -35,6 +36,21 @@ class Gateway:
     bot: Bot
     state: StateManager
     config: Config
+    # None (tests, embedding) means "no guard configured": behave as the poller.
+    poller_lock: Optional[PollerLock] = None
+
+
+def _standby_note() -> str:
+    return (
+        "NOTE: another Telegravity instance owns the Telegram poller, so "
+        "incoming messages are delivered to that instance — not this one. "
+        "send_message still works from here. If the other instance exits, "
+        f"this one takes over automatically within ~{POLLER_LOCK_RETRY_SEC:.0f}s."
+    )
+
+
+def _is_standby(gw: Gateway) -> bool:
+    return gw.poller_lock is not None and not gw.poller_lock.held
 
 
 _gateway: Optional[Gateway] = None
@@ -101,8 +117,15 @@ async def send_message(text: str) -> str:
 
 @mcp.tool()
 async def check_telegram_updates() -> List[str]:
-    """Return messages received from the user since the last poll. May be empty."""
-    return await _gw().state.drain_messages()
+    """Return messages received from the user since the last poll. May be empty.
+
+    If another Telegravity instance owns the Telegram poller, returns a single
+    explanatory NOTE instead (updates are delivered to that instance).
+    """
+    gw = _gw()
+    if _is_standby(gw):
+        return [_standby_note()]
+    return await gw.state.drain_messages()
 
 
 @mcp.tool()
@@ -111,8 +134,13 @@ async def wait_for_remote_instruction(timeout_sec: int = 300) -> List[str]:
 
     Returns the queued messages (possibly empty on timeout). Use this to enter
     "Active Mode" — the agent stays awake and reacts the moment the user types.
+    If another Telegravity instance owns the Telegram poller, returns a single
+    explanatory NOTE immediately instead of blocking.
     """
-    return await _gw().state.wait_for_messages(timeout=max(5, min(timeout_sec, 600)))
+    gw = _gw()
+    if _is_standby(gw):
+        return [_standby_note()]
+    return await gw.state.wait_for_messages(timeout=max(5, min(timeout_sec, 600)))
 
 
 @mcp.tool()

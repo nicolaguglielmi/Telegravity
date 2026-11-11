@@ -16,12 +16,13 @@ from typing import Optional
 from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Conflict, TelegramError
 
+from . import paths
 from .__version__ import __version__
 from .auth import AuthGate
 from .config import Config, ConfigError
 from .formatting import md2
-from . import paths
 from .mcp_tools import Gateway, bind, mcp
+from .pollerlock import POLLER_LOCK_RETRY_SEC, PollerLock
 from .state import StateManager
 from .ui.messenger import Messenger
 from .ui.pending import PendingRegistry
@@ -80,11 +81,12 @@ async def _poll_loop(bot: Bot, auth: AuthGate, router: Router) -> None:
                 except Exception:
                     logger.exception("Error handling update %s", upd.update_id)
         except Conflict as exc:
-            # Another process briefly grabbed the long-poll — common when an MCP
-            # client (Antigravity, Cursor, …) restarts or transiently duplicates
-            # the server. Don't give up permanently: back off and retry so we
-            # resume polling once the rival exits. (Run a single instance to
-            # avoid the churn entirely.)
+            # Another process briefly grabbed the long-poll. Same-DATA_DIR
+            # duplicates are prevented by the poller lock (see _poller_guard),
+            # so landing here means a rival with a different data dir, another
+            # host, or a non-Telegravity consumer of the token. Don't give up
+            # permanently: back off and retry so we resume polling once the
+            # rival exits.
             logger.warning(
                 "Telegram conflict — another instance is polling: %s "
                 "(retrying in %.1fs)",
@@ -104,6 +106,36 @@ async def _poll_loop(bot: Bot, auth: AuthGate, router: Router) -> None:
             logger.exception("Unexpected polling error")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
+
+
+async def _poller_guard(bot: Bot, auth: AuthGate, router: Router, lock: PollerLock) -> None:
+    """Run ``_poll_loop`` only while holding the exclusive poller lock.
+
+    Two MCP clients reading the same config spawn two telegravity processes
+    with the same token; if both long-polled getUpdates, Telegram would 409
+    and split updates randomly between them. Only the lock holder polls. A
+    standby instance keeps serving MCP tools (send still works; the receive
+    tools explain the situation — see mcp_tools) and retries the lock every
+    ``POLLER_LOCK_RETRY_SEC`` so it takes over when the holder exits.
+    """
+    standby = False
+    while True:
+        if lock.try_acquire():
+            if standby:
+                logger.info("Poller lock acquired — taking over Telegram polling")
+            await _poll_loop(bot, auth, router)
+            return
+        if not standby:
+            logger.warning(
+                "another Telegravity instance owns the Telegram poller — "
+                "standing by (MCP tools still served; retrying every %.0fs)",
+                POLLER_LOCK_RETRY_SEC,
+            )
+            standby = True
+        try:
+            await asyncio.sleep(POLLER_LOCK_RETRY_SEC)
+        except asyncio.CancelledError:
+            return
 
 
 async def _watch_workspaces(state: StateManager) -> None:
@@ -159,8 +191,9 @@ async def run() -> None:
     messenger = Messenger(bot, state)
     pending = PendingRegistry(ttl_seconds=config.PENDING_CONFIRM_TTL_SEC)
     router = Router(state, config, messenger, pending)
+    poller_lock = PollerLock()
 
-    bind(Gateway(bot=bot, state=state, config=config))
+    bind(Gateway(bot=bot, state=state, config=config, poller_lock=poller_lock))
 
     try:
         await bot.set_my_commands(BOT_COMMANDS)
@@ -169,7 +202,9 @@ async def run() -> None:
 
     await _send_startup_card(messenger, state, config)
 
-    poll_task = asyncio.create_task(_poll_loop(bot, auth, router), name="poll")
+    poll_task = asyncio.create_task(
+        _poller_guard(bot, auth, router, poller_lock), name="poll"
+    )
     watch_task = asyncio.create_task(_watch_workspaces(state), name="watch")
 
     try:
@@ -179,6 +214,7 @@ async def run() -> None:
         poll_task.cancel()
         watch_task.cancel()
         await asyncio.gather(poll_task, watch_task, return_exceptions=True)
+        poller_lock.release()
 
 
 def main() -> None:

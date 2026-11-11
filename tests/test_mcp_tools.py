@@ -183,3 +183,64 @@ def test_gateway_must_be_bound():
             m._gw()
     finally:
         m._gateway = saved
+
+
+# ---------------------------------------------------------------------------
+# Standby instances (another process holds the poller lock)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def standby_gateway(state, config, data_dir):
+    """Gateway whose poller lock is NOT held — another instance is polling."""
+    from telegravity.pollerlock import PollerLock
+
+    bot = AsyncMock()
+    lock = PollerLock()  # never acquired
+    mcp_tools.bind(
+        mcp_tools.Gateway(bot=bot, state=state, config=config, poller_lock=lock)
+    )
+    state.current_workspace = "Alpha"
+    state.workspaces.append("Alpha")
+    yield mcp_tools._gateway
+    lock.release()
+
+
+def test_check_updates_standby_returns_note_and_keeps_buffer(standby_gateway):
+    asyncio.run(standby_gateway.state.add_message("user: hi"))
+    result = _call(mcp_tools.check_telegram_updates)
+    assert len(result) == 1
+    assert "another Telegravity instance" in result[0]
+    # The buffer was not drained: after taking over the lock, it flows again.
+    assert standby_gateway.poller_lock.try_acquire()
+    assert any("user: hi" in m for m in _call(mcp_tools.check_telegram_updates))
+
+
+def test_wait_for_instruction_standby_returns_note_immediately(standby_gateway):
+    import time
+
+    start = time.monotonic()
+    result = _call(mcp_tools.wait_for_remote_instruction, timeout_sec=300)
+    assert time.monotonic() - start < 1  # no 300s park on a dead queue
+    assert len(result) == 1
+    assert "another Telegravity instance" in result[0]
+
+
+def test_send_message_still_works_in_standby(standby_gateway):
+    assert _call(mcp_tools.send_message, text="ping") == "SUCCESS"
+    standby_gateway.bot.send_message.assert_awaited_once()
+
+
+def test_holder_gateway_drains_normally(state, config, data_dir):
+    from telegravity.pollerlock import PollerLock
+
+    lock = PollerLock()
+    assert lock.try_acquire()
+    mcp_tools.bind(
+        mcp_tools.Gateway(bot=AsyncMock(), state=state, config=config, poller_lock=lock)
+    )
+    try:
+        asyncio.run(state.add_message("user: go"))
+        assert any("user: go" in m for m in _call(mcp_tools.check_telegram_updates))
+    finally:
+        lock.release()
