@@ -2,8 +2,10 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+from telegram.error import TelegramError
 
 from telegravity import mcp_tools
+from telegravity.formatting import SAFE_TEXT_LIMIT, utf16_len
 
 
 @pytest.fixture
@@ -244,3 +246,51 @@ def test_holder_gateway_drains_normally(state, config, data_dir):
         assert any("user: go" in m for m in _call(mcp_tools.check_telegram_updates))
     finally:
         lock.release()
+
+
+# ---------------------------------------------------------------------------
+# Telegram's per-message limit
+# ---------------------------------------------------------------------------
+def test_send_message_splits_text_too_long_for_one_message(bound_gateway):
+    """A long agent report used to be rejected whole; now it arrives in parts."""
+    report = "\n".join(f"finding {i}" for i in range(2000))
+    assert _call(mcp_tools.send_message, text=report) == "SUCCESS"
+
+    calls = bound_gateway.bot.send_message.await_args_list
+    assert len(calls) > 1
+    sent = [c.kwargs["text"] for c in calls]
+    assert all(utf16_len(part) <= SAFE_TEXT_LIMIT for part in sent)
+    # Nothing was dropped.
+    assert "".join(part.replace("\n", "") for part in sent) == report.replace("\n", "")
+    # The buffer records the message once, in full.
+    assert sum(report[:20] in m for m in bound_gateway.state.message_buffer) == 1
+
+
+def test_send_message_puts_the_keyboard_only_under_the_last_part(bound_gateway):
+    _call(mcp_tools.send_message, text="y" * (SAFE_TEXT_LIMIT * 2))
+    calls = bound_gateway.bot.send_message.await_args_list
+    assert len(calls) > 1
+    assert all(c.kwargs["reply_markup"] is None for c in calls[:-1])
+    assert calls[-1].kwargs["reply_markup"] is not None
+
+
+def test_send_message_reports_a_partial_delivery(bound_gateway):
+    """If Telegram dies halfway, say so — don't claim SUCCESS."""
+    bound_gateway.bot.send_message.side_effect = [None, TelegramError("boom")]
+    result = _call(mcp_tools.send_message, text="z" * (SAFE_TEXT_LIMIT * 2))
+    assert result.startswith("ERROR")
+    assert "1 of 2" in result
+
+
+def test_update_conversation_ping_fits_in_one_message(bound_gateway):
+    """MarkdownV2 can't be chunked, so an enormous summary must be trimmed."""
+    _call(
+        mcp_tools.update_conversation,
+        conv_desc="D" * 500,
+        status="done",
+        log_title="T" * 500,
+        summary="S" * 20_000,
+    )
+    text = bound_gateway.bot.send_message.await_args.kwargs["text"]
+    assert utf16_len(text) <= SAFE_TEXT_LIMIT
+    assert "…" in text  # trimmed rather than dropped

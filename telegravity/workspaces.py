@@ -9,7 +9,7 @@ to / override an earlier label):
    ``name -> folderUri`` with zero manual setup (when auto-import is enabled).
 2. **``INITIAL_WORKSPACES``** env — bare labels; path resolved from the
    auto-import map (or the base dir) if the name matches.
-3. **``data/workspaces.txt``** — one entry per line, either ``Label=/abs/path``
+3. **``<DATA_DIR>/workspaces.txt``** — one entry per line, either ``Label=/abs/path``
    (explicit) or a bare ``Label``.
 4. **Base-dir fallback** — when ``TELEGRAVITY_WORKSPACE_BASE`` is set, a bare
    label ``X`` with no path resolves to ``<base>/X`` if that is a directory.

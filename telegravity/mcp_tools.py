@@ -23,7 +23,7 @@ from telegram.error import TelegramError
 
 from .__version__ import __version__
 from .config import Config
-from .formatting import md2, now_str
+from .formatting import md2, now_str, short, split_message
 from .pollerlock import POLLER_LOCK_RETRY_SEC, PollerLock
 from .state import StateManager
 from .ui import executor
@@ -100,18 +100,30 @@ def _quick_keyboard() -> InlineKeyboardMarkup:
 
 @mcp.tool()
 async def send_message(text: str) -> str:
-    """Send a free-form message from the agent to the user on Telegram."""
+    """Send a free-form message from the agent to the user on Telegram.
+
+    Text longer than Telegram's per-message limit is split across several
+    messages rather than rejected, so a long report arrives in full.
+    """
     gw = _gw()
+    chunks = split_message(text)
+    sent = 0
     try:
-        await gw.bot.send_message(
-            chat_id=gw.config.authorized_chat_id,
-            text=text,
-            reply_markup=_quick_keyboard(),
-        )
+        for index, chunk in enumerate(chunks):
+            # Only the final chunk carries the keyboard: one set of buttons
+            # under the whole report, not one under every slice of it.
+            await gw.bot.send_message(
+                chat_id=gw.config.authorized_chat_id,
+                text=chunk,
+                reply_markup=_quick_keyboard() if index == len(chunks) - 1 else None,
+            )
+            sent += 1
         await gw.state.add_message(f"[{now_str()}] 🧠 Agent: {text}")
         return "SUCCESS"
     except TelegramError as exc:
-        logger.error("send_message failed: %s", exc)
+        logger.error("send_message failed after %d/%d parts: %s", sent, len(chunks), exc)
+        if sent:
+            return f"ERROR: only {sent} of {len(chunks)} parts were delivered: {exc}"
         return f"ERROR: {exc}"
 
 
@@ -341,14 +353,17 @@ async def update_conversation(
 
     if notify:
         try:
+            # MarkdownV2 can't be chunked safely (a split could land inside an
+            # escape sequence), so the ping is trimmed to fit one message.
+            # Escaping at worst doubles each field, hence the small budgets.
             msg = (
-                f"🛰️ *{md2(conv_desc)}*\n"
-                f"_status_ `{md2(status)}`"
+                f"🛰️ *{md2(short(conv_desc, 200))}*\n"
+                f"_status_ `{md2(short(status, 50))}`"
             )
             if log_title:
-                msg += f"\n_action_ {md2(log_title)}"
+                msg += f"\n_action_ {md2(short(log_title, 200))}"
             if summary:
-                msg += f"\n\n{md2(summary)}"
+                msg += f"\n\n{md2(short(summary, 1200))}"
             await gw.bot.send_message(
                 chat_id=gw.config.authorized_chat_id,
                 text=msg,

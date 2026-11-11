@@ -179,7 +179,7 @@ relocate it.
 | --------------------------------- | ---------------------------------------------------------------------- |
 | `check_telegram_updates()`        | Drain buffered Telegram messages since last call                        |
 | `wait_for_remote_instruction(t)`  | Long-poll up to `t` seconds for the next user message — *Active Mode*   |
-| `send_message(text)`              | Push a message from agent → user                                        |
+| `send_message(text)`              | Push a message from agent → user; long text is split across messages    |
 | `register_agent_activity(...)`    | Heartbeat for the dashboard (`thinking` / `executing` / `done` / …)     |
 | `get_state()`                     | Compact snapshot of workspace, its directory, conversations, buffer     |
 | `set_active_workspace(name)`      | Switch the active workspace (the project to work on)                    |
@@ -242,7 +242,7 @@ Run the package directly:
 python -m telegravity
 ```
 
-Tests: **226 passing · 93% coverage (90% enforced) · branch coverage on**.
+Tests: **267 passing · 94% coverage (90% enforced) · branch coverage on**.
 Compatible with MCP SDK 1.3+ and 2.x (`MCPServer`, with a `FastMCP` fallback).
 
 ## 📐 Architecture
