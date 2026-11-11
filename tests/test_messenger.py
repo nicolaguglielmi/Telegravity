@@ -88,3 +88,21 @@ async def test_send_plain_uses_markdown_v2(messenger, bot):
 async def test_send_plain_swallows_errors(messenger, bot):
     bot.send_message.side_effect = TelegramError("nope")
     await messenger.send_plain(42, "hello")
+
+
+@pytest.mark.asyncio
+async def test_send_menu_reports_delivery(messenger, bot):
+    """The startup card needs to know whether the screen actually landed."""
+    assert await messenger.send_menu(42, "hi") is True
+
+    bot.send_message.side_effect = TelegramError("Chat not found")
+    assert await messenger.send_menu(42, "hi") is False
+
+
+@pytest.mark.asyncio
+async def test_send_menu_reports_delivery_on_the_edit_path(messenger):
+    query = AsyncMock()
+    assert await messenger.send_menu(42, "hi", edit_query=query) is True
+
+    query.edit_message_text.side_effect = BadRequest("message is not modified")
+    assert await messenger.send_menu(42, "hi", edit_query=query) is True

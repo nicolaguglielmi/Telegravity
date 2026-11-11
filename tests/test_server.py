@@ -475,3 +475,58 @@ async def test_run_continues_when_set_my_commands_fails(monkeypatch, config):
 
     # Best-effort: should not raise even if registering commands fails.
     await asyncio.wait_for(server.run(), timeout=3)
+
+
+# ---------------------------------------------------------------------------
+# Startup token validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_verify_token_logs_the_bot_identity(caplog):
+    bot = AsyncMock()
+    bot.get_me.return_value = MagicMock(username="telegravity_bot")
+    with caplog.at_level(logging.INFO, logger="telegravity"):
+        await server._verify_token(bot)
+    assert "telegravity_bot" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_verify_token_exits_on_a_rejected_token(caplog):
+    """A bad token used to produce a process that looked healthy and was mute."""
+    bot = AsyncMock()
+    bot.get_me.side_effect = TelegramError("Unauthorized")
+    with caplog.at_level(logging.ERROR, logger="telegravity"):
+        with pytest.raises(SystemExit) as exc:
+            await server._verify_token(bot)
+    assert exc.value.code == 2
+    assert "TELEGRAM_TOKEN" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_aborts_before_polling_when_the_token_is_rejected(
+    monkeypatch, config, data_dir
+):
+    fake_bot = _make_fake_bot()
+    fake_bot.get_me.side_effect = TelegramError("Unauthorized")
+    monkeypatch.setattr(server, "Bot", MagicMock(return_value=fake_bot))
+    monkeypatch.setattr(server.Config, "load", staticmethod(lambda: config))
+
+    with pytest.raises(SystemExit) as exc:
+        await asyncio.wait_for(server.run(), timeout=3)
+
+    assert exc.value.code == 2
+    fake_bot.get_updates.assert_not_awaited()
+    fake_bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_startup_card_failure_points_at_the_chat_id(config, state, caplog):
+    """Not fatal — the user may simply not have opened the chat yet."""
+    bot = AsyncMock()
+    bot.send_message.side_effect = TelegramError("Chat not found")
+    messenger = Messenger(bot, state)
+    with caplog.at_level(logging.ERROR, logger="telegravity"):
+        await server._send_startup_card(messenger, state, config)
+    assert "AUTHORIZED_CHAT_ID" in caplog.text
+    assert str(config.authorized_chat_id) in caplog.text

@@ -157,21 +157,54 @@ async def _watch_workspaces(state: StateManager) -> None:
             await asyncio.sleep(10)
 
 
-async def _send_startup_card(messenger: Messenger, state: StateManager, config: Config) -> None:
+async def _verify_token(bot: Bot) -> None:
+    """Fail loudly on a bad token instead of running mute forever.
+
+    Nothing else here is fatal: ``set_my_commands`` and the startup card both
+    swallow TelegramError so a transient Telegram outage can't stop the MCP
+    server coming up. That used to mean a wrong token produced a process that
+    looked perfectly healthy — MCP tools answering, no crash — while the bot
+    simply never existed. ``get_me`` is the one call whose failure is always
+    the operator's problem, so it exits like a config error does.
+    """
     try:
-        text = (
-            "🟢 *Telegravity online* · "
-            f"_v{md2(__version__)}_\n\n"
-            "Tap below to open the dashboard\\."
-        )
-        markup = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🚀 Open dashboard", callback_data="ui_menu")]]
-        )
-        await messenger.send_menu(config.authorized_chat_id, text, markup)
-        # Mark agent as connected
-        state.update_agent("idle", "ready")
+        me = await bot.get_me()
     except TelegramError as exc:
-        logger.error("Startup card failed: %s", exc)
+        logger.error(
+            "Telegram rejected TELEGRAM_TOKEN: %s\n"
+            "Check the token @BotFather gave you and set TELEGRAM_TOKEN in "
+            "your .env (or %s).",
+            exc,
+            paths.ENV_FILE,
+        )
+        sys.exit(2)
+    logger.info("Authenticated with Telegram as @%s", me.username)
+
+
+async def _send_startup_card(messenger: Messenger, state: StateManager, config: Config) -> None:
+    text = (
+        "🟢 *Telegravity online* · "
+        f"_v{md2(__version__)}_\n\n"
+        "Tap below to open the dashboard\\."
+    )
+    markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🚀 Open dashboard", callback_data="ui_menu")]]
+    )
+    # Messenger swallows Telegram errors so a failed redraw can't kill the
+    # worker, so ask it whether the card actually landed.
+    delivered = await messenger.send_menu(config.authorized_chat_id, text, markup)
+    if not delivered:
+        # Usually AUTHORIZED_CHAT_ID is wrong, or the user has never opened the
+        # chat — Telegram won't deliver to a chat that doesn't exist yet. Not
+        # fatal: the moment they send /start, polling picks them up.
+        logger.error(
+            "Could not send the startup card to chat_id=%s. Open Telegram, "
+            "send /start to your bot, and check AUTHORIZED_CHAT_ID "
+            "(ask @userinfobot for yours).",
+            config.authorized_chat_id,
+        )
+    # The agent itself is connected either way.
+    state.update_agent("idle", "ready")
 
 
 async def run() -> None:
@@ -187,6 +220,7 @@ async def run() -> None:
     paths.ensure_data_dir()
     state = StateManager(config)
     bot = Bot(token=config.telegram_token)
+    await _verify_token(bot)
     auth = AuthGate(config.authorized_chat_id)
     messenger = Messenger(bot, state)
     pending = PendingRegistry(ttl_seconds=config.PENDING_CONFIRM_TTL_SEC)
