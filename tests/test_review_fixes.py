@@ -137,8 +137,8 @@ def test_autoimport_default_on_end_to_end(data_dir, monkeypatch):
     monkeypatch.setenv("AUTHORIZED_CHAT_ID", "1")
     monkeypatch.setenv("TELEGRAVITY_AUTOIMPORT", "1")
     monkeypatch.setenv("TELEGRAVITY_PROJECTS_DIR", str(projects))
-    from telegravity.config import Config
     import telegravity.state as state_mod
+    from telegravity.config import Config
 
     importlib.reload(state_mod)
     sm = state_mod.StateManager(Config.load())

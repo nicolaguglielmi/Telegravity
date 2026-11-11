@@ -14,6 +14,11 @@
   the lock every 10 s so it takes over when the holder exits. POSIX-only
   (`fcntl`); on Windows the guard is a no-op.
 
+### Added
+- **CI on every push and pull request** (`.github/workflows/ci.yml`): the test
+  suite across Python 3.11–3.14, a lint gate (`ruff`), and a packaging build
+  check. Previously tests only ran on a `v*` tag push, i.e. at release time.
+
 ## 0.3.1 — 2026-08-18
 
 ### Changed
