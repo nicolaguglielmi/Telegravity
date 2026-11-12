@@ -12,12 +12,24 @@ from typing import Tuple
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from .. import paths
 from ..__version__ import __version__
 from ..config import Config
 from ..formatting import badge, inline_code, md2, short
 from ..state import StateManager
 
 DIVIDER = "─" * 24
+
+
+def _workspaces_file() -> str:
+    """The workspaces file as inline code, resolved when the screen renders.
+
+    Never cache this at import time: ``paths`` re-resolves after each
+    ``load_dotenv`` (``TELEGRAVITY_DATA_DIR`` may arrive from a ``.env``), so a
+    module-level constant would freeze the pre-``.env`` path and send the user
+    to a file the server never reads.
+    """
+    return inline_code(str(paths.WORKSPACES_FILE))
 
 
 # ---------------------------------------------------------------------------
@@ -48,55 +60,58 @@ def render_welcome(state: StateManager, first_name: str = "") -> Tuple[str, Inli
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
 
 
-_TOUR_STEPS = [
-    {
-        "title": "1 / 4 · Workspaces",
-        "body": (
-            "💼 *Workspaces* are your project folders\\.\n\n"
-            "Each one has its own *conversations*, *active focus*, and *inbox*\\. "
-            "Switch between them from the dashboard top\\-right\\.\n\n"
-            "Add new ones from your `.env` \\(`INITIAL_WORKSPACES`\\) or by editing "
-            "`data/workspaces.txt` while the bot is running — it hot\\-reloads\\."
-        ),
-    },
-    {
-        "title": "2 / 4 · Conversations",
-        "body": (
-            "💬 Each workspace holds *conversations* — long\\-running threads "
-            "of work\\.\n\n"
-            "Tap one to read the full request/response history, including files "
-            "touched and progress steps the agent reported\\."
-        ),
-    },
-    {
-        "title": "3 / 4 · Remote instructions",
-        "body": (
-            "📡 Enable *Chat Mode* and anything you type is queued for the agent\\.\n\n"
-            "When your agent calls `check_telegram_updates` \\(or sits in "
-            "`wait_for_remote_instruction`\\) it picks up your message and acts "
-            "on it\\."
-        ),
-    },
-    {
-        "title": "4 / 4 · Active Mode",
-        "body": (
-            "⚡ Ask the agent *“enter Active Mode”* in your IDE\\.\n\n"
-            "It will block on `wait_for_remote_instruction` and wake up the "
-            "*instant* you send a Telegram message — no IDE nudge needed\\.\n\n"
-            "_You're all set — open the dashboard\\._"
-        ),
-    },
-]
+def _tour_steps() -> list:
+    """Built per render so the workspaces path reflects the live data dir."""
+    return [
+        {
+            "title": "1 / 4 · Workspaces",
+            "body": (
+                "💼 *Workspaces* are your project folders\\.\n\n"
+                "Each one has its own *conversations*, *active focus*, and *inbox*\\. "
+                "Switch between them from the dashboard top\\-right\\.\n\n"
+                "Add new ones from your `.env` \\(`INITIAL_WORKSPACES`\\) or by editing "
+                f"{_workspaces_file()} while the bot is running — it hot\\-reloads\\."
+            ),
+        },
+        {
+            "title": "2 / 4 · Conversations",
+            "body": (
+                "💬 Each workspace holds *conversations* — long\\-running threads "
+                "of work\\.\n\n"
+                "Tap one to read the full request/response history, including files "
+                "touched and progress steps the agent reported\\."
+            ),
+        },
+        {
+            "title": "3 / 4 · Remote instructions",
+            "body": (
+                "📡 Enable *Chat Mode* and anything you type is queued for the agent\\.\n\n"
+                "When your agent calls `check_telegram_updates` \\(or sits in "
+                "`wait_for_remote_instruction`\\) it picks up your message and acts "
+                "on it\\."
+            ),
+        },
+        {
+            "title": "4 / 4 · Active Mode",
+            "body": (
+                "⚡ Ask the agent *“enter Active Mode”* in your IDE\\.\n\n"
+                "It will block on `wait_for_remote_instruction` and wake up the "
+                "*instant* you send a Telegram message — no IDE nudge needed\\.\n\n"
+                "_You're all set — open the dashboard\\._"
+            ),
+        },
+    ]
 
 
 def render_tour(step: int) -> Tuple[str, InlineKeyboardMarkup]:
-    idx = max(1, min(step, len(_TOUR_STEPS)))
-    data = _TOUR_STEPS[idx - 1]
+    steps = _tour_steps()
+    idx = max(1, min(step, len(steps)))
+    data = steps[idx - 1]
     text = f"*{md2(data['title'])}*\n{DIVIDER}\n\n{data['body']}"
     nav = []
     if idx > 1:
         nav.append(InlineKeyboardButton("◀ Back", callback_data=f"tour:{idx-1}"))
-    if idx < len(_TOUR_STEPS):
+    if idx < len(steps):
         nav.append(InlineKeyboardButton("Next ▶", callback_data=f"tour:{idx+1}"))
     else:
         nav.append(InlineKeyboardButton("🚀 Open dashboard", callback_data="ui_menu"))
@@ -204,7 +219,10 @@ def _render_dashboard_no_workspace(
             ]
             keyboard.append(row)
     else:
-        lines.append("\n_No workspaces registered yet\\. Edit `data/workspaces.txt` or set `INITIAL_WORKSPACES`\\._")
+        lines.append(
+            f"\n_No workspaces registered yet\\._ Edit {_workspaces_file()} "
+            "or set `INITIAL_WORKSPACES`\\."
+        )
 
     keyboard.append([InlineKeyboardButton("🔄 Reload list", callback_data="ui_sync")])
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
@@ -216,7 +234,7 @@ def render_workspace_picker(state: StateManager) -> Tuple[str, InlineKeyboardMar
         DIVIDER,
     ]
     if not state.workspaces:
-        lines.append("_No workspaces yet — edit `data/workspaces.txt`\\._")
+        lines.append(f"_No workspaces yet\\._ Edit {_workspaces_file()}\\.")
         keyboard = [[InlineKeyboardButton("🏠 Dashboard", callback_data="ui_menu")]]
         return "\n".join(lines), InlineKeyboardMarkup(keyboard)
 
@@ -359,7 +377,8 @@ def render_interaction_detail(
     ]
     if log.get("summary"):
         body_lines.append("")
-        body_lines.append(f"_{md2(log['summary'])}_")
+        # Escaping can double the length, so cap before it, not after.
+        body_lines.append(f"_{md2(short(str(log['summary']), 1200))}_")
     if log.get("files"):
         body_lines.append("")
         body_lines.append("*Files*")
@@ -402,8 +421,10 @@ def render_activity_feed(state: StateManager) -> Tuple[str, InlineKeyboardMarkup
     if not messages:
         lines.append("_No activity yet\\._")
     else:
+        # One long agent report could blow the whole screen past Telegram's
+        # per-message limit, so every line is capped before it's escaped.
         for m in messages:
-            lines.append(md2(m))
+            lines.append(md2(short(m, 180)))
     keyboard = [
         [
             InlineKeyboardButton("🔄 Refresh", callback_data="ui_chat_log"),

@@ -48,6 +48,7 @@ telegravity/
 ├── __version__.py
 ├── config.py              # env loading + validation (Config dataclass)
 ├── paths.py               # data-dir resolution (lazy, env-overridable)
+├── pollerlock.py          # single-poller election (flock on poller.lock)
 ├── state.py               # StateManager (single source of truth)
 ├── workspaces.py          # workspace discovery: label -> real project path
 ├── auth.py                # AuthGate (single-user filter)
@@ -80,7 +81,7 @@ instead delivered to the agent: queued instructions are tagged
 `telegravity.server.run()` orchestrates startup:
 
 1. Load `Config` (raises `ConfigError` with a friendly message if invalid).
-2. Build `StateManager` (loads `data/state.json`, conversations, logs).
+2. Build `StateManager` (loads `<DATA_DIR>/state.json`, conversations, logs).
 3. Build `Bot`, `AuthGate`, `Messenger`, `PendingRegistry`, `Router`.
 4. Bind the MCP `Gateway` so the tools can reach bot/state/config.
 5. Register slash commands with Telegram.
@@ -139,7 +140,7 @@ A single `StateManager` owns:
 
 - `workspaces: list[str]` + `workspace_paths: dict[str, str]` — projects and
   their real directories, resolved from Antigravity's auto-imported project
-  registry, `INITIAL_WORKSPACES`, `data/workspaces.txt` (`Label=/path` or bare
+  registry, `INITIAL_WORKSPACES`, `<DATA_DIR>/workspaces.txt` (`Label=/path` or bare
   `Label`), and an optional `TELEGRAVITY_WORKSPACE_BASE`. Hot-reloaded on change.
 - `conversations: dict[str, list[Conversation]]` — per-workspace threads,
   each with `interactions: list[Interaction]` (title, summary, files, steps,

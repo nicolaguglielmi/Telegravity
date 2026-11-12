@@ -32,7 +32,14 @@ class Messenger:
         *,
         edit_query: Optional[CallbackQuery] = None,
         replace_previous: bool = True,
-    ) -> None:
+    ) -> bool:
+        """Render a screen. Returns whether it actually reached the chat.
+
+        Telegram errors are swallowed and logged here — a failed redraw must
+        not kill the polling worker — so the boolean is the only way a caller
+        can tell. The startup card uses it to explain a misconfigured
+        AUTHORIZED_CHAT_ID instead of failing silently.
+        """
         if edit_query:
             try:
                 await edit_query.edit_message_text(
@@ -40,11 +47,12 @@ class Messenger:
                     reply_markup=markup,
                     parse_mode=ParseMode.MARKDOWN_V2,
                 )
-                return
+                return True
             except BadRequest as exc:
-                # "message is not modified" → harmless, skip silently.
+                # "message is not modified" → harmless, the screen is already
+                # what we wanted it to be.
                 if "not modified" in str(exc).lower():
-                    return
+                    return True
                 logger.debug("Inline edit failed (%s), falling back to send", exc)
             except TelegramError as exc:
                 logger.warning("Inline edit failed: %s", exc)
@@ -66,8 +74,10 @@ class Messenger:
             )
             self.state.last_menu_message_id = msg.message_id
             self.state.save_state()
+            return True
         except TelegramError as exc:
             logger.error("Failed to send menu: %s", exc)
+            return False
 
     async def send_plain(
         self,

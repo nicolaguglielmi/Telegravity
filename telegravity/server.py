@@ -16,12 +16,13 @@ from typing import Optional
 from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Conflict, TelegramError
 
+from . import paths
 from .__version__ import __version__
 from .auth import AuthGate
 from .config import Config, ConfigError
 from .formatting import md2
-from . import paths
 from .mcp_tools import Gateway, bind, mcp
+from .pollerlock import POLLER_LOCK_RETRY_SEC, PollerLock
 from .state import StateManager
 from .ui.messenger import Messenger
 from .ui.pending import PendingRegistry
@@ -80,11 +81,12 @@ async def _poll_loop(bot: Bot, auth: AuthGate, router: Router) -> None:
                 except Exception:
                     logger.exception("Error handling update %s", upd.update_id)
         except Conflict as exc:
-            # Another process briefly grabbed the long-poll — common when an MCP
-            # client (Antigravity, Cursor, …) restarts or transiently duplicates
-            # the server. Don't give up permanently: back off and retry so we
-            # resume polling once the rival exits. (Run a single instance to
-            # avoid the churn entirely.)
+            # Another process briefly grabbed the long-poll. Same-DATA_DIR
+            # duplicates are prevented by the poller lock (see _poller_guard),
+            # so landing here means a rival with a different data dir, another
+            # host, or a non-Telegravity consumer of the token. Don't give up
+            # permanently: back off and retry so we resume polling once the
+            # rival exits.
             logger.warning(
                 "Telegram conflict — another instance is polling: %s "
                 "(retrying in %.1fs)",
@@ -106,6 +108,36 @@ async def _poll_loop(bot: Bot, auth: AuthGate, router: Router) -> None:
             backoff = min(backoff * 2, 30)
 
 
+async def _poller_guard(bot: Bot, auth: AuthGate, router: Router, lock: PollerLock) -> None:
+    """Run ``_poll_loop`` only while holding the exclusive poller lock.
+
+    Two MCP clients reading the same config spawn two telegravity processes
+    with the same token; if both long-polled getUpdates, Telegram would 409
+    and split updates randomly between them. Only the lock holder polls. A
+    standby instance keeps serving MCP tools (send still works; the receive
+    tools explain the situation — see mcp_tools) and retries the lock every
+    ``POLLER_LOCK_RETRY_SEC`` so it takes over when the holder exits.
+    """
+    standby = False
+    while True:
+        if lock.try_acquire():
+            if standby:
+                logger.info("Poller lock acquired — taking over Telegram polling")
+            await _poll_loop(bot, auth, router)
+            return
+        if not standby:
+            logger.warning(
+                "another Telegravity instance owns the Telegram poller — "
+                "standing by (MCP tools still served; retrying every %.0fs)",
+                POLLER_LOCK_RETRY_SEC,
+            )
+            standby = True
+        try:
+            await asyncio.sleep(POLLER_LOCK_RETRY_SEC)
+        except asyncio.CancelledError:
+            return
+
+
 async def _watch_workspaces(state: StateManager) -> None:
     last_mtime: Optional[float] = None
     while True:
@@ -125,21 +157,54 @@ async def _watch_workspaces(state: StateManager) -> None:
             await asyncio.sleep(10)
 
 
-async def _send_startup_card(messenger: Messenger, state: StateManager, config: Config) -> None:
+async def _verify_token(bot: Bot) -> None:
+    """Fail loudly on a bad token instead of running mute forever.
+
+    Nothing else here is fatal: ``set_my_commands`` and the startup card both
+    swallow TelegramError so a transient Telegram outage can't stop the MCP
+    server coming up. That used to mean a wrong token produced a process that
+    looked perfectly healthy — MCP tools answering, no crash — while the bot
+    simply never existed. ``get_me`` is the one call whose failure is always
+    the operator's problem, so it exits like a config error does.
+    """
     try:
-        text = (
-            "🟢 *Telegravity online* · "
-            f"_v{md2(__version__)}_\n\n"
-            "Tap below to open the dashboard\\."
-        )
-        markup = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🚀 Open dashboard", callback_data="ui_menu")]]
-        )
-        await messenger.send_menu(config.authorized_chat_id, text, markup)
-        # Mark agent as connected
-        state.update_agent("idle", "ready")
+        me = await bot.get_me()
     except TelegramError as exc:
-        logger.error("Startup card failed: %s", exc)
+        logger.error(
+            "Telegram rejected TELEGRAM_TOKEN: %s\n"
+            "Check the token @BotFather gave you and set TELEGRAM_TOKEN in "
+            "your .env (or %s).",
+            exc,
+            paths.ENV_FILE,
+        )
+        sys.exit(2)
+    logger.info("Authenticated with Telegram as @%s", me.username)
+
+
+async def _send_startup_card(messenger: Messenger, state: StateManager, config: Config) -> None:
+    text = (
+        "🟢 *Telegravity online* · "
+        f"_v{md2(__version__)}_\n\n"
+        "Tap below to open the dashboard\\."
+    )
+    markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🚀 Open dashboard", callback_data="ui_menu")]]
+    )
+    # Messenger swallows Telegram errors so a failed redraw can't kill the
+    # worker, so ask it whether the card actually landed.
+    delivered = await messenger.send_menu(config.authorized_chat_id, text, markup)
+    if not delivered:
+        # Usually AUTHORIZED_CHAT_ID is wrong, or the user has never opened the
+        # chat — Telegram won't deliver to a chat that doesn't exist yet. Not
+        # fatal: the moment they send /start, polling picks them up.
+        logger.error(
+            "Could not send the startup card to chat_id=%s. Open Telegram, "
+            "send /start to your bot, and check AUTHORIZED_CHAT_ID "
+            "(ask @userinfobot for yours).",
+            config.authorized_chat_id,
+        )
+    # The agent itself is connected either way.
+    state.update_agent("idle", "ready")
 
 
 async def run() -> None:
@@ -155,12 +220,14 @@ async def run() -> None:
     paths.ensure_data_dir()
     state = StateManager(config)
     bot = Bot(token=config.telegram_token)
+    await _verify_token(bot)
     auth = AuthGate(config.authorized_chat_id)
     messenger = Messenger(bot, state)
     pending = PendingRegistry(ttl_seconds=config.PENDING_CONFIRM_TTL_SEC)
     router = Router(state, config, messenger, pending)
+    poller_lock = PollerLock()
 
-    bind(Gateway(bot=bot, state=state, config=config))
+    bind(Gateway(bot=bot, state=state, config=config, poller_lock=poller_lock))
 
     try:
         await bot.set_my_commands(BOT_COMMANDS)
@@ -169,7 +236,9 @@ async def run() -> None:
 
     await _send_startup_card(messenger, state, config)
 
-    poll_task = asyncio.create_task(_poll_loop(bot, auth, router), name="poll")
+    poll_task = asyncio.create_task(
+        _poller_guard(bot, auth, router, poller_lock), name="poll"
+    )
     watch_task = asyncio.create_task(_watch_workspaces(state), name="watch")
 
     try:
@@ -179,6 +248,7 @@ async def run() -> None:
         poll_task.cancel()
         watch_task.cancel()
         await asyncio.gather(poll_task, watch_task, return_exceptions=True)
+        poller_lock.release()
 
 
 def main() -> None:

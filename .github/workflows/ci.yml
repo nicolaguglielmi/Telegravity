@@ -1,0 +1,63 @@
+name: CI
+
+# Runs on every push to main and on every pull request. Before this existed
+# the suite only ran on a `v*` tag push — i.e. a regression was discovered at
+# release time, with the version already bumped and the changelog written.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pinned: an unpinned linter turns somebody else's release into a red
+      # build on an unrelated PR.
+      - run: python -m pip install "ruff==0.17.4"
+      - run: ruff check telegravity tests
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every version the package claims to support in its classifiers.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      # The coverage gate (90%, branch coverage) lives in pyproject's addopts,
+      # so a plain pytest enforces it.
+      - name: Run test suite
+        run: pytest -q
+        env:
+          # Never let the suite touch a real ~/.telegravity.
+          TELEGRAVITY_DATA_DIR: ${{ runner.temp }}/telegravity-data
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: python -m pip install --upgrade build && python -m build
+      - name: Check metadata
+        run: python -m pip install --upgrade twine && twine check dist/*
+      - name: Scan artifacts for secrets and stray copies of the repo
+        run: scripts/check_sdist.sh

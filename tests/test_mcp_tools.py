@@ -2,8 +2,10 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+from telegram.error import TelegramError
 
 from telegravity import mcp_tools
+from telegravity.formatting import SAFE_TEXT_LIMIT, utf16_len
 
 
 @pytest.fixture
@@ -183,3 +185,112 @@ def test_gateway_must_be_bound():
             m._gw()
     finally:
         m._gateway = saved
+
+
+# ---------------------------------------------------------------------------
+# Standby instances (another process holds the poller lock)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def standby_gateway(state, config, data_dir):
+    """Gateway whose poller lock is NOT held — another instance is polling."""
+    from telegravity.pollerlock import PollerLock
+
+    bot = AsyncMock()
+    lock = PollerLock()  # never acquired
+    mcp_tools.bind(
+        mcp_tools.Gateway(bot=bot, state=state, config=config, poller_lock=lock)
+    )
+    state.current_workspace = "Alpha"
+    state.workspaces.append("Alpha")
+    yield mcp_tools._gateway
+    lock.release()
+
+
+def test_check_updates_standby_returns_note_and_keeps_buffer(standby_gateway):
+    asyncio.run(standby_gateway.state.add_message("user: hi"))
+    result = _call(mcp_tools.check_telegram_updates)
+    assert len(result) == 1
+    assert "another Telegravity instance" in result[0]
+    # The buffer was not drained: after taking over the lock, it flows again.
+    assert standby_gateway.poller_lock.try_acquire()
+    assert any("user: hi" in m for m in _call(mcp_tools.check_telegram_updates))
+
+
+def test_wait_for_instruction_standby_returns_note_immediately(standby_gateway):
+    import time
+
+    start = time.monotonic()
+    result = _call(mcp_tools.wait_for_remote_instruction, timeout_sec=300)
+    assert time.monotonic() - start < 1  # no 300s park on a dead queue
+    assert len(result) == 1
+    assert "another Telegravity instance" in result[0]
+
+
+def test_send_message_still_works_in_standby(standby_gateway):
+    assert _call(mcp_tools.send_message, text="ping") == "SUCCESS"
+    standby_gateway.bot.send_message.assert_awaited_once()
+
+
+def test_holder_gateway_drains_normally(state, config, data_dir):
+    from telegravity.pollerlock import PollerLock
+
+    lock = PollerLock()
+    assert lock.try_acquire()
+    mcp_tools.bind(
+        mcp_tools.Gateway(bot=AsyncMock(), state=state, config=config, poller_lock=lock)
+    )
+    try:
+        asyncio.run(state.add_message("user: go"))
+        assert any("user: go" in m for m in _call(mcp_tools.check_telegram_updates))
+    finally:
+        lock.release()
+
+
+# ---------------------------------------------------------------------------
+# Telegram's per-message limit
+# ---------------------------------------------------------------------------
+def test_send_message_splits_text_too_long_for_one_message(bound_gateway):
+    """A long agent report used to be rejected whole; now it arrives in parts."""
+    report = "\n".join(f"finding {i}" for i in range(2000))
+    assert _call(mcp_tools.send_message, text=report) == "SUCCESS"
+
+    calls = bound_gateway.bot.send_message.await_args_list
+    assert len(calls) > 1
+    sent = [c.kwargs["text"] for c in calls]
+    assert all(utf16_len(part) <= SAFE_TEXT_LIMIT for part in sent)
+    # Nothing was dropped.
+    assert "".join(part.replace("\n", "") for part in sent) == report.replace("\n", "")
+    # The buffer records the message once, in full.
+    assert sum(report[:20] in m for m in bound_gateway.state.message_buffer) == 1
+
+
+def test_send_message_puts_the_keyboard_only_under_the_last_part(bound_gateway):
+    _call(mcp_tools.send_message, text="y" * (SAFE_TEXT_LIMIT * 2))
+    calls = bound_gateway.bot.send_message.await_args_list
+    assert len(calls) > 1
+    assert all(c.kwargs["reply_markup"] is None for c in calls[:-1])
+    assert calls[-1].kwargs["reply_markup"] is not None
+
+
+def test_send_message_reports_a_partial_delivery(bound_gateway):
+    """If Telegram dies halfway, say so — don't claim SUCCESS."""
+    bound_gateway.bot.send_message.side_effect = [None, TelegramError("boom")]
+    result = _call(mcp_tools.send_message, text="z" * (SAFE_TEXT_LIMIT * 2))
+    assert result.startswith("ERROR")
+    assert "1 of 2" in result
+
+
+def test_update_conversation_ping_fits_in_one_message(bound_gateway):
+    """MarkdownV2 can't be chunked, so an enormous summary must be trimmed."""
+    _call(
+        mcp_tools.update_conversation,
+        conv_desc="D" * 500,
+        status="done",
+        log_title="T" * 500,
+        summary="S" * 20_000,
+    )
+    text = bound_gateway.bot.send_message.await_args.kwargs["text"]
+    assert utf16_len(text) <= SAFE_TEXT_LIMIT
+    assert "…" in text  # trimmed rather than dropped

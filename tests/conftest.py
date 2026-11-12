@@ -62,6 +62,7 @@ def config(monkeypatch):
 @pytest.fixture
 def state(config, data_dir):
     import importlib
+
     import telegravity.state as state_mod
 
     importlib.reload(state_mod)

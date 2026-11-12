@@ -49,6 +49,9 @@ dev = [
     "pytest-cov>=5.0.0",
     "pytest-timeout>=2.3.0",
     "coverage>=7.4.0",
+    # Pinned to the version .github/workflows/ci.yml enforces, so `ruff check`
+    # locally and in CI agree.
+    "ruff==0.17.4",
 ]
 
 [project.urls]
@@ -70,6 +73,20 @@ packages = ["telegravity"]
 # Belt and braces: .claude/ can hold agent worktrees, i.e. entire copies of
 # the repository at arbitrary past states. Never ship it.
 exclude = [".claude", "data", "venv", ".venv", "dist"]
+
+[tool.ruff]
+# 120 is what this codebase was written to; the lint gate enforces it rather
+# than reformatting every keyboard/render call.
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# A deliberately small, zero-noise set: real defects (F, E9, B), import
+# hygiene (I), and comprehension smells (C4). The typing modernisation rules
+# (UP) are intentionally NOT enabled — the codebase still uses
+# ``typing.List``/``Optional`` consistently, and flipping it is a separate,
+# mechanical change rather than something a CI gate should block on.
+select = ["E", "F", "W", "I", "B", "C4"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

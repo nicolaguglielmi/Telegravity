@@ -179,7 +179,7 @@ relocate it.
 | --------------------------------- | ---------------------------------------------------------------------- |
 | `check_telegram_updates()`        | Drain buffered Telegram messages since last call                        |
 | `wait_for_remote_instruction(t)`  | Long-poll up to `t` seconds for the next user message — *Active Mode*   |
-| `send_message(text)`              | Push a message from agent → user                                        |
+| `send_message(text)`              | Push a message from agent → user; long text is split across messages    |
 | `register_agent_activity(...)`    | Heartbeat for the dashboard (`thinking` / `executing` / `done` / …)     |
 | `get_state()`                     | Compact snapshot of workspace, its directory, conversations, buffer     |
 | `set_active_workspace(name)`      | Switch the active workspace (the project to work on)                    |
@@ -203,8 +203,15 @@ Plus the resource `telegram://inbox` for read-only buffer access.
   when a different folder is open in the IDE.
 - **One Telegram identity.** This is a *single-user* tool by design — the
   whole security model leans on the `AUTHORIZED_CHAT_ID` filter.
-- **One bot, one process.** The bot uses long-poll `get_updates`; running
-  two copies against the same token will cause Telegram-side conflicts.
+- **One bot, one process.** The bot uses long-poll `get_updates`, and Telegram
+  allows only one consumer per token. Duplicate instances are handled for you
+  as long as they share a data dir: an advisory lock on `<DATA_DIR>/poller.lock`
+  elects a single poller, and any extra instance (e.g. two MCP clients reading
+  the same `mcp_config.json` each spawning the server) stands by — it still
+  serves MCP tools and `send_message`, its receive tools return an explanatory
+  note, and it takes over polling within ~10 s if the holder exits. Instances
+  with *different* data dirs (or on different machines) still conflict at
+  Telegram's side.
 - **No transport encryption claim.** State lives as JSON under `~/.telegravity/`
   (or your `TELEGRAVITY_DATA_DIR`).
   Don't store secrets in conversation titles or summaries.
@@ -235,7 +242,7 @@ Run the package directly:
 python -m telegravity
 ```
 
-Tests: **226 passing · 93% coverage (90% enforced) · branch coverage on**.
+Tests: **267 passing · 94% coverage (90% enforced) · branch coverage on**.
 Compatible with MCP SDK 1.3+ and 2.x (`MCPServer`, with a `FastMCP` fallback).
 
 ## 📐 Architecture

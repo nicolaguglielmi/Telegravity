@@ -2,6 +2,8 @@
 
 from telegram import InlineKeyboardMarkup
 
+import telegravity.paths as paths
+from telegravity.formatting import SAFE_TEXT_LIMIT, utf16_len
 from telegravity.ui import views
 
 
@@ -281,3 +283,62 @@ def test_file_confirm_buttons():
     assert "file_ok:tok456" in cbs
 
 
+
+
+# ---------------------------------------------------------------------------
+# The workspaces file the server actually reads
+# ---------------------------------------------------------------------------
+def test_tour_points_at_the_real_workspaces_file(state):
+    """It used to say `data/workspaces.txt`, which the server never reads."""
+    text, _ = views.render_tour(1)
+    assert str(paths.WORKSPACES_FILE) in text
+    assert "`data/workspaces.txt`" not in text
+
+
+def test_empty_states_point_at_the_real_workspaces_file(state):
+    state.workspaces = []
+    state.current_workspace = None
+    picker, _ = views.render_workspace_picker(state)
+    dashboard, _ = views.render_dashboard(state, state.config)
+    for text in (picker, dashboard):
+        assert str(paths.WORKSPACES_FILE) in text
+        assert "`data/workspaces.txt`" not in text
+
+
+def test_workspaces_hint_follows_a_relocated_data_dir(state, tmp_path, monkeypatch):
+    """TELEGRAVITY_DATA_DIR can arrive from a .env after import, so the hint
+    must be resolved per render, not frozen at module load."""
+    elsewhere = tmp_path / "relocated"
+    monkeypatch.setenv("TELEGRAVITY_DATA_DIR", str(elsewhere))
+    paths.refresh()
+    text, _ = views.render_tour(1)
+    assert str(elsewhere / "workspaces.txt") in text
+
+
+# ---------------------------------------------------------------------------
+# Nothing a renderer produces may exceed Telegram's per-message limit
+# ---------------------------------------------------------------------------
+def test_activity_feed_caps_a_flood_of_long_messages(state):
+    state.message_buffer = [f"{i} " + "x" * 5000 for i in range(20)]
+    text, _ = views.render_activity_feed(state)
+    assert utf16_len(text) <= SAFE_TEXT_LIMIT
+
+
+def test_interaction_detail_caps_a_huge_summary(state):
+    state.current_workspace = "Alpha"
+    state.conversations["Alpha"] = [
+        {
+            "desc": "Big one",
+            "status": "active",
+            "interactions": [
+                {
+                    "title": "Step",
+                    "summary": "S" * 50_000,
+                    "content": "C" * 50_000,
+                    "time": "now",
+                }
+            ],
+        }
+    ]
+    text, _ = views.render_interaction_detail(state, 0, 0)
+    assert utf16_len(text) <= SAFE_TEXT_LIMIT
