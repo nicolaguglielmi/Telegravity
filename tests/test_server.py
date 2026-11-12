@@ -512,8 +512,14 @@ async def test_run_aborts_before_polling_when_the_token_is_rejected(
     monkeypatch.setattr(server, "Bot", MagicMock(return_value=fake_bot))
     monkeypatch.setattr(server.Config, "load", staticmethod(lambda: config))
 
+    # ``asyncio.timeout``, not ``wait_for``: ``wait_for`` runs the coroutine in
+    # a child Task, and a Task that raises SystemExit re-raises it into the
+    # event loop instead of handing it to the awaiting frame, so on Python 3.11
+    # it escaped past ``pytest.raises`` and failed the test. ``timeout`` keeps
+    # the guard against a hang without the extra Task.
     with pytest.raises(SystemExit) as exc:
-        await asyncio.wait_for(server.run(), timeout=3)
+        async with asyncio.timeout(3):
+            await server.run()
 
     assert exc.value.code == 2
     fake_bot.get_updates.assert_not_awaited()
